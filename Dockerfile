@@ -17,4 +17,4 @@ VOLUME /data
 
 EXPOSE 4000
 
-CMD ["sh", "-c", "uvicorn app.server:app --host 0.0.0.0 --port 4000 || (echo 'EXIT CODE:' $?; exit 1)"]
+CMD ["uvicorn", "app.server:app", "--host", "0.0.0.0", "--port", "4000"]
