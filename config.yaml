@@ -3,14 +3,19 @@
 
 # Model routing: override which provider handles a model
 # If not listed, provider is auto-detected from model name
-models: {}
+models:
+  Qwen3.5-27B:
+    provider: llama-swap
   # gpt-4o:
   #   provider: openai
   # claude-sonnet-4-5-20250514:
   #   provider: anthropic
 
 # Provider overrides (optional)
-providers: {}
+providers:
+  llama-swap:
+    base_url: http://10.0.2.100:9944/v1
+
   # openai:
   #   base_url: https://api.openai.com/v1
   #   # api_key: can set here but prefer .env

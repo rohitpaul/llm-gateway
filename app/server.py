@@ -19,7 +19,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from app import config
 from app.database import Database
-from app.providers import proxy_chat_completions, resolve_provider, calculate_cost, PRICING
+from app.providers import proxy_chat_completions, resolve_provider, calculate_cost, PRICING, _infer_provider
 
 # ---------------------------------------------------------------------------
 # Globals
@@ -29,6 +29,17 @@ db = Database()
 app_config: dict = {}
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "..", "templates"))
 
+
+
+def _int_param(request: Request, name: str, default: int | None = None) -> int | None:
+    """Parse an integer query parameter from a Starlette Request."""
+    val = request.query_params.get(name)
+    if val is None:
+        return default
+    try:
+        return int(val)
+    except ValueError:
+        return default
 
 # ---------------------------------------------------------------------------
 # Key helpers
@@ -125,7 +136,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 @app.post("/v1/chat/completions")
 @app.post("/chat/completions")
 async def chat_completions(request: Request):
-    """Main proxy endpoint — OpenAI-compatible chat completions."""
+    """Main proxy endpoint - OpenAI-compatible chat completions."""
     key_info = await verify_virtual_key(request)
     body = await request.json()
     model = body.get("model", "")
@@ -159,7 +170,43 @@ async def chat_completions(request: Request):
         )
         raise HTTPException(status_code=502, detail=f"Upstream error: {str(e)[:200]}")
 
-    # Log the request
+    if stream and isinstance(response, AsyncIterator):
+        # Streaming: the response is an async generator. meta is a shared dict
+        # that will be populated by the generator as it runs. We need to log
+        # AFTER the generator finishes. We cannot use the generator's finally
+        # block because Starlette may not await it properly.
+        # Instead, we use Starlette's BackgroundTask which runs after the response
+        # is fully sent (including the complete stream body).
+
+        async def _log_after_stream():
+            """Called by Starlette after the streaming response is fully sent."""
+            try:
+                await db.log_request(
+                    virtual_key_id=key_info.get("id"),
+                    request_id=meta["request_id"],
+                    model=model,
+                    provider=provider,
+                    input_tokens=meta.get("input_tokens", 0),
+                    output_tokens=meta.get("output_tokens", 0),
+                    cache_read=meta.get("cache_read_tokens", 0),
+                    cache_write=meta.get("cache_write_tokens", 0),
+                    cost=meta.get("cost", 0),
+                    latency_ms=meta.get("latency_ms", 0),
+                    status=meta.get("status", "success"),
+                    error_message=meta.get("error_message"),
+                    source_ip=request.client.host if request.client else None,
+                )
+            except Exception as e:
+                print(f"Stream logging error: {e}")
+
+        from starlette.background import BackgroundTask
+        return StreamingResponse(
+            response,
+            media_type="text/event-stream",
+            background=BackgroundTask(_log_after_stream),
+        )
+
+    # Non-streaming: log immediately (meta already populated)
     await db.log_request(
         virtual_key_id=key_info.get("id"),
         request_id=meta["request_id"],
@@ -176,9 +223,6 @@ async def chat_completions(request: Request):
         source_ip=request.client.host if request.client else None,
     )
 
-    if stream and isinstance(response, AsyncIterator):
-        return StreamingResponse(response, media_type="text/event-stream")
-
     return JSONResponse(content=response)
 
 
@@ -187,17 +231,19 @@ async def chat_completions(request: Request):
 async def list_models():
     """List available models."""
     models = []
-    for name in PRICING:
-        models.append({
-            "id": name,
-            "object": "model",
-            "created": 0,
-            "owned_by": "llm-gateway",
-        })
-    # Add models from config
+    seen = set()
+    # 1. Explicitly configured in config.yaml (always shown, even without API keys)
     for model_name in app_config.get("models", {}):
-        if not any(m["id"] == model_name for m in models):
+        if model_name not in seen:
             models.append({"id": model_name, "object": "model", "created": 0, "owned_by": "llm-gateway"})
+            seen.add(model_name)
+    # 2. Have a working API key for their auto-detected provider
+    for name in PRICING:
+        if name not in seen:
+            provider = _infer_provider(name)
+            if config.get_provider_api_key(provider):
+                models.append({"id": name, "object": "model", "created": 0, "owned_by": "llm-gateway"})
+                seen.add(name)
     return {"object": "list", "data": models}
 
 
@@ -297,21 +343,21 @@ async def stats_providers(request: Request, admin: dict = Depends(verify_admin))
 async def stats_daily(request: Request, admin: dict = Depends(verify_admin)):
     date_from = request.query_params.get("date_from")
     date_to = request.query_params.get("date_to")
-    key_id = request.query_params.get("key_id", type=int)
+    key_id = _int_param(request, "key_id")
     return {"daily": await db.get_daily_stats(date_from, date_to, key_id)}
 
 
 @app.get("/api/requests")
 async def list_requests(request: Request, admin: dict = Depends(verify_admin)):
-    key_id = request.query_params.get("key_id", type=int)
+    key_id = _int_param(request, "key_id")
     model = request.query_params.get("model")
     provider = request.query_params.get("provider")
     date_from = request.query_params.get("date_from")
     date_to = request.query_params.get("date_to")
-    limit = request.query_params.get("limit", 50, type=int)
-    offset = request.query_params.get("offset", 0, type=int)
-    requests, total = await db.get_requests(key_id, model, provider, date_from, date_to, limit, offset)
-    return {"requests": requests, "total": total, "limit": limit, "offset": offset}
+    limit = _int_param(request, "limit", 50)
+    offset = _int_param(request, "offset", 0)
+    reqs, total = await db.get_requests(key_id, model, provider, date_from, date_to, limit, offset)
+    return {"requests": reqs, "total": total, "limit": limit, "offset": offset}
 
 
 # ---------------------------------------------------------------------------

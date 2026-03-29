@@ -147,11 +147,8 @@ async def proxy_chat_completions(
     base_url = _get_base_url(provider, cfg)
     api_key = _get_api_key(provider, cfg)
 
-    if not api_key:
-        raise ValueError(f"No API key configured for provider '{provider}'")
-
-    # Build headers based on provider
-    headers = _build_headers(provider, api_key)
+    # Build headers — local/self-hosted providers may not need API keys
+    headers = _build_headers(provider, api_key or "")
 
     # Build the request body — Anthropic needs different format
     url, req_body = _build_request(provider, base_url, body)
@@ -165,10 +162,12 @@ async def proxy_chat_completions(
         "error_message": None,
     }
 
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        if stream:
-            return await _handle_stream(client, url, headers, req_body, model, provider, start, meta)
+    if stream:
+        # Client must stay alive for streaming — closed in _handle_stream finally block
+        client = httpx.AsyncClient(timeout=timeout)
+        return await _handle_stream(client, url, headers, req_body, model, provider, start, meta)
 
+    async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(url, headers=headers, json=req_body)
         latency_ms = (time.monotonic() - start) * 1000
 
@@ -256,6 +255,12 @@ async def _handle_stream(
                                     cd = u.get("prompt_tokens_details", {})
                                     if isinstance(cd, dict):
                                         usage_data["cache_read"] = cd.get("cached_tokens", usage_data["cache_read"])
+                                # Fallback: llama.cpp sends timings with prompt_n/predicted_n
+                                if usage_data["input_tokens"] == 0:
+                                    timings = parsed.get("timings", {})
+                                    if timings:
+                                        usage_data["input_tokens"] = timings.get("prompt_n", 0)
+                                        usage_data["output_tokens"] = timings.get("predicted_n", 0)
                         except (json.JSONDecodeError, KeyError, TypeError):
                             pass
                     yield (line + "\n\n").encode()
@@ -264,6 +269,8 @@ async def _handle_stream(
             meta["error_message"] = str(e)[:500]
             meta["latency_ms"] = (time.monotonic() - start) * 1000
             yield f'data: {{"error": {json.dumps(str(e))}}}\n\n'.encode()
+        finally:
+            await client.aclose()
 
     return stream_generator(), meta
 
@@ -281,10 +288,10 @@ def _build_headers(provider: str, api_key: str) -> dict[str, str]:
             "content-type": "application/json",
         }
     # OpenAI-compatible (openai, groq, together, deepseek, mistral, xai, openrouter, etc.)
-    return {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    h = {"Content-Type": "application/json"}
+    if api_key:
+        h["Authorization"] = f"Bearer {api_key}"
+    return h
 
 
 def _build_request(provider: str, base_url: str, body: dict) -> tuple[str, dict]:
