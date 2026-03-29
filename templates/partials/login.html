@@ -1,0 +1,30 @@
+
+<!-- Login Screen -->
+<div x-show="!authenticated" x-cloak class="min-h-screen flex items-center justify-center">
+    <div class="bg-gray-900 rounded-xl p-8 border border-gray-800 w-full max-w-sm">
+        <div class="flex items-center gap-3 mb-6">
+            <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center font-bold text-lg">G</div>
+            <div>
+                <h1 class="text-xl font-semibold text-gray-100">LLM Gateway</h1>
+                <p class="text-xs text-gray-500">Sign in to access the dashboard</p>
+            </div>
+        </div>
+        <div x-show="loginError" x-cloak class="bg-red-900/20 border border-red-800 rounded-lg px-3 py-2 mb-4 text-sm text-red-400" x-text="loginError"></div>
+        <form @submit.prevent="login()">
+            <label class="text-xs text-gray-400 block mb-1.5">Admin Key</label>
+            <input x-model="loginKey" :type="showLoginKey ? 'text' : 'password'" placeholder="Enter your admin key"
+                   @keydown.enter="login()"
+                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 mb-4 font-mono"
+                   x-ref="loginInput">
+            <div class="flex items-center gap-2 mb-4">
+                <input type="checkbox" x-model="showLoginKey" class="rounded border-gray-600 bg-gray-800">
+                <span class="text-xs text-gray-400">Show key</span>
+            </div>
+            <button type="submit" :disabled="loginLoading"
+                    class="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2.5 rounded-lg text-sm font-medium transition">
+                <span x-show="!loginLoading">Sign In</span>
+                <span x-show="loginLoading">Verifying...</span>
+            </button>
+        </form>
+    </div>
+</div>

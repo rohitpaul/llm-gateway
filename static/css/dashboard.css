@@ -1,0 +1,50 @@
+[x-cloak] { display: none !important; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; }
+.tab-active { border-bottom: 2px solid #3b82f6; color: #3b82f6; }
+.fade-in { animation: fadeIn 0.2s ease-in; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Mobile card layout for tables */
+@media (max-width: 767px) {
+    .mobile-cards { display: block; }
+    .mobile-cards thead { display: none; }
+    .mobile-cards tbody { display: block; }
+    .mobile-cards tr {
+        display: block;
+        padding: 12px 16px;
+        border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .mobile-cards tr:last-child { border-bottom: none; }
+    .mobile-cards td {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 3px 0 !important;
+        text-align: left !important;
+        font-size: 13px;
+    }
+    .mobile-cards td::before {
+        content: attr(data-label);
+        color: #9ca3af;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        flex-shrink: 0;
+        margin-right: 12px;
+    }
+    .mobile-cards td:last-child::before { display: none; }
+
+    /* Row header for request cards */
+    .mobile-card-header {
+        display: flex !important;
+        justify-content: space-between;
+        align-items: center;
+        padding-bottom: 8px !important;
+        margin-bottom: 4px;
+        border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .mobile-card-header::before { display: none; }
+
+    /* Hide columns that are secondary on mobile */
+    .hide-mobile { display: none !important; }
+}

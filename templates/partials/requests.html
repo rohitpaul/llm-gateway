@@ -1,0 +1,72 @@
+    <!-- Requests Tab -->
+    <div x-show="tab==='requests'" x-cloak class="fade-in">
+        <div class="bg-gray-900 rounded-lg border border-gray-800 overflow-hidden">
+            <table class="w-full text-sm mobile-cards">
+                <thead class="bg-gray-800/50 text-gray-400 text-xs uppercase">
+                    <tr>
+                        <th class="px-4 py-3 text-left">Time</th>
+                        <th class="px-4 py-3 text-left">Model</th>
+                        <th class="px-4 py-3 text-left hide-mobile">Provider</th>
+                        <th class="px-4 py-3 text-right">Tokens In</th>
+                        <th class="px-4 py-3 text-right">Tokens Out</th>
+                        <th class="px-4 py-3 text-right">Cost</th>
+                        <th class="px-4 py-3 text-right hide-mobile">Latency</th>
+                        <th class="px-4 py-3 text-center">Status</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-800">
+                    <template x-for="r in requests" :key="r.id">
+                        <tr class="hover:bg-gray-800/30 cursor-pointer" @click="showRequestDetail(r.id)">
+                            <td class="mobile-card-header px-4 py-2.5 text-gray-400 whitespace-nowrap" x-text="formatTime(r.created_at)" data-label=""></td>
+                            <td class="px-4 py-1 font-mono text-xs" x-text="r.model" data-label="Model"></td>
+                            <td class="px-4 py-2.5 capitalize text-gray-400 hide-mobile" x-text="r.provider" data-label="Provider"></td>
+                            <td class="px-4 py-1 text-right font-mono" x-text="formatTokens(r.input_tokens)" data-label="In"></td>
+                            <td class="px-4 py-1 text-right font-mono" x-text="formatTokens(r.output_tokens)" data-label="Out"></td>
+                            <td class="px-4 py-1 text-right font-mono text-green-400" x-text="'$' + (r.cost || 0).toFixed(4)" data-label="Cost"></td>
+                            <td class="px-4 py-2.5 text-right font-mono text-gray-400 hide-mobile" x-text="(r.latency_ms || 0).toFixed(0) + 'ms'" data-label="Latency"></td>
+                            <td class="px-4 py-1 text-right" data-label="">
+                                <span x-show="r.status==='success'" class="text-green-500">✓</span>
+                                <span x-show="r.status==='error'" class="text-red-500" :title="r.error_message">✗</span>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+            <div x-show="requests.length === 0" class="text-gray-500 text-sm text-center py-8">No requests yet — make your first API call!</div>
+            <!-- Pagination -->
+            <div class="flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-3 border-t border-gray-800">
+                <!-- Left: total + page size -->
+                <div class="flex items-center gap-2 text-xs text-gray-400">
+                    <span x-text="requestsTotal.toLocaleString() + ' total'"></span>
+                    <span class="text-gray-600">|</span>
+                    <select x-model.number="requestsPerPage" @change="requestsOffset = 0; loadRequests()"
+                            class="bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 text-xs text-gray-300 focus:outline-none focus:border-blue-500">
+                        <option value="25">25 / page</option>
+                        <option value="50">50 / page</option>
+                        <option value="100">100 / page</option>
+                    </select>
+                </div>
+                <!-- Right: page buttons -->
+                <div class="flex items-center gap-1">
+                    <button @click="requestsOffset = 0; loadRequests()"
+                            :disabled="requestsOffset === 0"
+                            class="px-2 py-1 text-xs bg-gray-800 rounded disabled:opacity-30 hover:bg-gray-700 transition">«</button>
+                    <button @click="requestsOffset = Math.max(0, requestsOffset - requestsPerPage); loadRequests()"
+                            :disabled="requestsOffset === 0"
+                            class="px-2 py-1 text-xs bg-gray-800 rounded disabled:opacity-30 hover:bg-gray-700 transition">‹</button>
+                    <template x-for="p in requestPages" :key="p">
+                        <span x-show="p === -1" class="px-1 text-xs text-gray-500">…</span>
+                        <button x-show="p !== -1" @click="requestsOffset = (p - 1) * requestsPerPage; loadRequests()"
+                                :class="requestCurrentPage === p ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'"
+                                class="px-2 py-1 text-xs rounded min-w-[28px] transition" x-text="p"></button>
+                    </template>
+                    <button @click="requestsOffset = Math.min(Math.max(0, requestTotalPages * requestsPerPage - requestsPerPage), requestsOffset + requestsPerPage); loadRequests()"
+                            :disabled="requestsOffset + requestsPerPage >= requestsTotal"
+                            class="px-2 py-1 text-xs bg-gray-800 rounded disabled:opacity-30 hover:bg-gray-700 transition">›</button>
+                    <button @click="requestsOffset = Math.max(0, (requestTotalPages - 1) * requestsPerPage); loadRequests()"
+                            :disabled="requestsOffset + requestsPerPage >= requestsTotal"
+                            class="px-2 py-1 text-xs bg-gray-800 rounded disabled:opacity-30 hover:bg-gray-700 transition">»</button>
+                </div>
+            </div>
+        </div>
+    </div>

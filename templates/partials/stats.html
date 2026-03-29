@@ -1,0 +1,104 @@
+    <!-- Charts — Stats tab only -->
+    <div x-show="tab==='stats'" x-cloak class="mb-6">
+        <div class="bg-gray-900 rounded-lg p-4 border border-gray-800">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-sm font-medium text-gray-300">Daily Usage <span class="text-gray-500" x-text="'(last ' + chartDays + ' days)'"></span></h3>
+                <div class="flex gap-1 text-xs">
+                    <template x-for="d in [7, 14, 30]" :key="d">
+                        <button @click="chartDays = d; loadDailyStats()"
+                                :class="chartDays === d ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'"
+                                class="px-2 py-1 rounded" x-text="d + 'd'"></button>
+                    </template>
+                </div>
+            </div>
+            <div class="grid md:grid-cols-2 gap-4 sm:gap-6">
+                <div class="h-52 sm:h-64">
+                    <div id="chartTokens"></div>
+                </div>
+                <div class="h-52 sm:h-64">
+                    <div id="chartCost"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats Tab -->
+    <div x-show="tab==='stats'" x-cloak class="fade-in space-y-6">
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4">
+            <div class="bg-gray-900 rounded-lg p-3 sm:p-4 border border-gray-800">
+                <div class="text-[10px] sm:text-xs text-gray-400 mb-0.5 sm:mb-1">Total Requests</div>
+                <div class="text-lg sm:text-2xl font-bold" x-text="(summary.total_requests || 0).toLocaleString()">0</div>
+            </div>
+            <div class="bg-gray-900 rounded-lg p-3 sm:p-4 border border-gray-800">
+                <div class="text-[10px] sm:text-xs text-gray-400 mb-0.5 sm:mb-1">Total Cost</div>
+                <div class="text-lg sm:text-2xl font-bold text-green-400" x-text="'$' + (summary.total_cost || 0).toFixed(2)">$0</div>
+            </div>
+            <div class="bg-gray-900 rounded-lg p-3 sm:p-4 border border-gray-800">
+                <div class="text-[10px] sm:text-xs text-gray-400 mb-0.5 sm:mb-1">Input Tokens</div>
+                <div class="text-lg sm:text-2xl font-bold" x-text="formatTokens(summary.total_input_tokens || 0)">0</div>
+            </div>
+            <div class="bg-gray-900 rounded-lg p-3 sm:p-4 border border-gray-800">
+                <div class="text-[10px] sm:text-xs text-gray-400 mb-0.5 sm:mb-1">Output Tokens</div>
+                <div class="text-lg sm:text-2xl font-bold" x-text="formatTokens(summary.total_output_tokens || 0)">0</div>
+            </div>
+        </div>
+
+        <!-- Model breakdown -->
+        <div class="grid md:grid-cols-2 gap-6">
+            <div class="bg-gray-900 rounded-lg p-4 border border-gray-800">
+                <h3 class="text-sm font-medium text-gray-300 mb-3">Cost by Model</h3>
+                <div class="space-y-2">
+                    <template x-for="m in modelStats" :key="m.model">
+                        <div class="flex items-center justify-between text-sm">
+                            <span class="text-gray-300 truncate mr-4" x-text="m.model" :title="m.model"></span>
+                            <div class="flex items-center gap-3 shrink-0">
+                                <span class="text-gray-500" x-text="(m.request_count || 0).toLocaleString() + ' req'"></span>
+                                <span class="text-green-400 font-mono w-20 text-right" x-text="'$' + (m.cost || 0).toFixed(4)"></span>
+                            </div>
+                        </div>
+                    </template>
+                    <div x-show="modelStats.length === 0" class="text-gray-500 text-sm text-center py-4">No data yet</div>
+                </div>
+            </div>
+
+            <div class="bg-gray-900 rounded-lg p-4 border border-gray-800">
+                <h3 class="text-sm font-medium text-gray-300 mb-3">Cost by Provider</h3>
+                <div class="space-y-2">
+                    <template x-for="p in providerStats" :key="p.provider">
+                        <div class="flex items-center justify-between text-sm">
+                            <span class="text-gray-300 capitalize" x-text="p.provider"></span>
+                            <div class="flex items-center gap-3 shrink-0">
+                                <span class="text-gray-500" x-text="(p.request_count || 0).toLocaleString() + ' req'"></span>
+                                <span class="text-green-400 font-mono w-20 text-right" x-text="'$' + (p.cost || 0).toFixed(4)"></span>
+                            </div>
+                        </div>
+                    </template>
+                    <div x-show="providerStats.length === 0" class="text-gray-500 text-sm text-center py-4">No data yet</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Provider health -->
+        <div class="bg-gray-900 rounded-lg p-4 border border-gray-800">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-sm font-medium text-gray-300">Provider Health</h3>
+                <button @click="checkProviderHealth()" class="text-xs text-blue-400 hover:text-blue-300" x-text="providerHealthLoading ? 'Checking...' : 'Check now'"></button>
+            </div>
+            <div class="space-y-1.5">
+                <template x-for="[name, info] in Object.entries(providerHealth)" :key="name">
+                    <div class="flex items-center justify-between text-sm">
+                        <span class="text-gray-300 capitalize" x-text="name"></span>
+                        <div class="flex items-center gap-2">
+                            <span x-show="info.latency_ms" class="text-gray-500 font-mono text-xs" x-text="(info.latency_ms || 0).toFixed(0) + 'ms'"></span>
+                            <span x-show="info.status==='reachable'" class="text-green-400 text-xs">✓ up</span>
+                            <span x-show="info.status==='error'" class="text-yellow-400 text-xs" :title="info.error">⚠ error</span>
+                            <span x-show="info.status==='unreachable'" class="text-red-400 text-xs" :title="info.error">✗ down</span>
+                            <span x-show="info.status==='no_url'" class="text-gray-600 text-xs">not configured</span>
+                        </div>
+                    </div>
+                </template>
+                <div x-show="Object.keys(providerHealth).length === 0" class="text-gray-500 text-sm text-center py-3">No providers configured</div>
+            </div>
+        </div>
+    </div>

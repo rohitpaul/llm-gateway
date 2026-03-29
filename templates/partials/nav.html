@@ -1,0 +1,8 @@
+<!-- Tabs -->
+<nav x-show="authenticated" x-cloak class="border-b border-gray-800 px-3 sm:px-6">
+    <div class="max-w-7xl mx-auto flex gap-4 sm:gap-6 text-sm">
+        <button @click="tab='stats'" :class="tab==='stats' ? 'tab-active py-3 font-medium' : 'py-3 text-gray-400 hover:text-gray-200'">Stats</button>
+        <button @click="tab='requests'" :class="tab==='requests' ? 'tab-active py-3 font-medium' : 'py-3 text-gray-400 hover:text-gray-200'">Requests</button>
+        <button @click="tab='keys'" :class="tab==='keys' ? 'tab-active py-3 font-medium' : 'py-3 text-gray-400 hover:text-gray-200'">Keys</button>
+    </div>
+</nav>

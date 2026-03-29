@@ -496,6 +496,9 @@ async def get_request(request_id: int, admin: dict = Depends(verify_admin)):
 # Dashboard (HTML)
 # ---------------------------------------------------------------------------
 
+app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "..", "static")), name="static")
+
+
 @app.get("/")
 async def dashboard(request: Request):
     return templates.TemplateResponse("dashboard.html", {"request": request})
