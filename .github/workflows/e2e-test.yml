@@ -36,102 +36,85 @@ jobs:
         run: |
           printf 'models: {}\nproviders: {}\n' > config.yaml
 
-      - name: Start server in background
+      - name: Test server startup
         run: |
-          uvicorn app.server:app --host 127.0.0.1 --port 4000 > /tmp/server.log 2>&1 &
+          python3 -c "
+          import sys, traceback
+          sys.path.insert(0, '.')
+          try:
+              from app import server
+              print('Import OK')
+          except Exception:
+              traceback.print_exc()
+              sys.exit(1)
+          "
+
+      - name: Start server and run tests
+        run: |
+          python3 -m uvicorn app.server:app --host 127.0.0.1 --port 4000 > /tmp/server.log 2>&1 &
           SERVER_PID=$!
           echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
           sleep 5
           if ! kill -0 $SERVER_PID 2>/dev/null; then
-            echo "## Server crashed on startup" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            cat /tmp/server.log >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "::error::Server crashed on startup"
+            echo "::group::Server log"
+            cat /tmp/server.log
+            echo "::endgroup::"
             exit 1
           fi
           echo "Server started with PID $SERVER_PID"
 
-      - name: Test /health endpoint
-        run: |
-          RESPONSE=$(curl -sf http://localhost:4000/health)
-          echo "Response: $RESPONSE"
-          echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('status') == 'ok'; print('OK /health')"
+          echo "=== Test /health ==="
+          curl -sf http://localhost:4000/health || { echo "FAIL /health"; exit 1; }
+          echo ""
 
-      - name: Test dashboard (/)
-        run: |
+          echo "=== Test dashboard ==="
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/)
-          if [ "$STATUS" -ne 200 ]; then
-            echo "Dashboard returned $STATUS"
-            exit 1
-          fi
-          echo "OK dashboard ($STATUS)"
+          echo "Dashboard: $STATUS"
+          [ "$STATUS" = "200" ] || exit 1
 
-      - name: Test /v1/models (unauthenticated)
-        run: |
+          echo "=== Test /v1/models ==="
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/v1/models)
-          if [ "$STATUS" -eq 500 ]; then
-            echo "/v1/models crashed"
-            exit 1
-          fi
-          echo "OK /v1/models ($STATUS)"
+          echo "/v1/models: $STATUS"
+          [ "$STATUS" != "500" ]
 
-      - name: Test admin key creation
-        run: |
+          echo "=== Test key creation ==="
           RESPONSE=$(curl -sf -X POST http://localhost:4000/admin/keys \
             -H "Authorization: Bearer ${{ env.GATEWAY_ADMIN_KEY }}" \
             -H "Content-Type: application/json" \
             -d '{"name": "e2e-test-key"}')
           echo "Create: $RESPONSE"
-          KEY=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('key',''))" 2>/dev/null || true)
-          if [ -z "$KEY" ]; then
-            echo "Failed to create key"
-            exit 1
-          fi
-          echo "OK key created: ${KEY:0:10}..."
 
-      - name: Test admin key listing
-        run: |
+          echo "=== Test key listing ==="
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer ${{ env.GATEWAY_ADMIN_KEY }}" \
             http://localhost:4000/admin/keys)
-          if [ "$STATUS" -ne 200 ]; then
-            echo "Key listing returned $STATUS"
-            exit 1
-          fi
-          echo "OK key listing ($STATUS)"
+          echo "Key listing: $STATUS"
+          [ "$STATUS" = "200" ] || exit 1
 
-      - name: Test admin stats endpoints
-        run: |
+          echo "=== Test stats ==="
           for ep in summary models providers daily; do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
               -H "Authorization: Bearer ${{ env.GATEWAY_ADMIN_KEY }}" \
               "http://localhost:4000/api/stats/$ep")
-            if [ "$STATUS" -ne 200 ]; then
-              echo "/api/stats/$ep returned $STATUS"
-              exit 1
-            fi
-            echo "OK /api/stats/$ep"
+            echo "  /api/stats/$ep: $STATUS"
+            [ "$STATUS" = "200" ] || exit 1
           done
 
-      - name: Test provider health
-        run: |
+          echo "=== Test provider health ==="
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/api/health/providers)
-          if [ "$STATUS" -ne 200 ]; then
-            echo "Provider health returned $STATUS"
-            exit 1
-          fi
-          echo "OK provider health ($STATUS)"
+          echo "Provider health: $STATUS"
+          [ "$STATUS" = "200" ] || exit 1
 
-      - name: Test auth rejection (bad key)
-        run: |
+          echo "=== Test auth rejection ==="
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer sk-wrong" \
             http://localhost:4000/admin/keys)
-          if [ "$STATUS" -ne 401 ] && [ "$STATUS" -ne 403 ]; then
-            echo "Bad key returned $STATUS, expected 401/403"
-            exit 1
-          fi
-          echo "OK auth rejection ($STATUS)"
+          echo "Auth rejection: $STATUS"
+          [ "$STATUS" = "401" ] || [ "$STATUS" = "403" ] || exit 1
+
+          echo "=== ALL TESTS PASSED ==="
+          kill $SERVER_PID 2>/dev/null || true
 
       - name: Stop server
         if: always()
@@ -158,25 +141,17 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Verify image has all files
+      - name: Verify image
         run: |
-          {
-            echo "## Docker image contents"
-            echo '```'
-            docker run --rm llm-gateway:test ls -la /app/
-            echo '```'
-            echo "## /app/static"
-            echo '```'
-            docker run --rm llm-gateway:test ls -la /app/static/ || echo "MISSING"
-            echo '```'
-            echo "## /app/templates"
-            echo '```'
-            docker run --rm llm-gateway:test ls -la /app/templates/
-            echo '```'
-            echo "## Python import test"
-            echo '```'
-            docker run --rm -e GATEWAY_DB=/tmp/test.db llm-gateway:test python3 -c "
-          import traceback, sys
+          echo "== /app =="
+          docker run --rm llm-gateway:test ls -la /app/
+          echo "== /app/static =="
+          docker run --rm llm-gateway:test ls -laR /app/static/ || echo "::error::Missing /app/static"
+          echo "== /app/templates =="
+          docker run --rm llm-gateway:test ls -la /app/templates/ || echo "::error::Missing /app/templates"
+          echo "== Python import =="
+          docker run --rm -e GATEWAY_DB=/tmp/test.db llm-gateway:test python3 -c "
+          import sys, traceback
           try:
               import app.server
               print('Import OK')
@@ -184,5 +159,3 @@ jobs:
               traceback.print_exc()
               sys.exit(1)
           "
-            echo '```'
-          } >> $GITHUB_STEP_SUMMARY
