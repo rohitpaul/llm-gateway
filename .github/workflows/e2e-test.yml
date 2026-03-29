@@ -37,6 +37,7 @@ jobs:
           tags: llm-gateway:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          no-cache: true
 
       - name: Create minimal config
         run: |
@@ -58,23 +59,16 @@ jobs:
       - name: Debug - container status and logs (early)
         run: |
           sleep 5
-          echo "=== Container state ===" | tee /tmp/debug.log
-          docker inspect llm-gateway-test --format='Status: {{.State.Status}}, ExitCode: {{.State.ExitCode}}, Error: {{.State.Error}}' | tee -a /tmp/debug.log || true
-          echo "=== Container logs ===" | tee -a /tmp/debug.log
-          docker logs llm-gateway-test 2>&1 | tee -a /tmp/debug.log || true
-          echo "=== Files in /app ===" | tee -a /tmp/debug.log
-          docker exec llm-gateway-test ls -la /app/ 2>&1 | tee -a /tmp/debug.log || true
-          echo "=== Config file ===" | tee -a /tmp/debug.log
-          docker exec llm-gateway-test cat /app/config.yaml 2>&1 | tee -a /tmp/debug.log || true
-          echo "=== Internal health check ===" | tee -a /tmp/debug.log
-          docker exec llm-gateway-test sh -c "wget -qO- http://localhost:4000/health 2>&1 || echo 'wget failed'" | tee -a /tmp/debug.log || true
-
-      - name: Upload debug logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-logs
-          path: /tmp/debug.log
+          echo "=== Container state ==="
+          docker inspect llm-gateway-test --format='Status: {{.State.Status}}, ExitCode: {{.State.ExitCode}}, Error: {{.State.Error}}' || true
+          echo "=== Container logs ==="
+          docker logs llm-gateway-test 2>&1 || true
+          echo "=== Files in /app ==="
+          docker exec llm-gateway-test ls -la /app/ 2>&1 || true
+          echo "=== Config file ==="
+          docker exec llm-gateway-test cat /app/config.yaml 2>&1 || true
+          echo "=== Internal health check ==="
+          docker exec llm-gateway-test sh -c "wget -qO- http://localhost:4000/health 2>&1 || echo 'wget failed'" || true
 
       - name: Wait for gateway to be healthy
         run: |
