@@ -40,10 +40,13 @@ jobs:
 
       - name: Create minimal config
         run: |
-          cat > /tmp/test-config.yaml <<'EOF'
+          cat > /tmp/test-config.yaml << 'EOF'
           models: {}
           providers: {}
           EOF
+
+      - name: Debug - show config contents
+        run: cat /tmp/test-config.yaml
 
       - name: Start LLM Gateway container
         run: |
@@ -55,6 +58,18 @@ jobs:
             -e GATEWAY_DB=/data/gateway.db \
             llm-gateway:test
 
+      - name: Debug - container status and logs (early)
+        run: |
+          sleep 3
+          echo "Container state:"
+          docker inspect llm-gateway-test --format='Status: {{.State.Status}}, ExitCode: {{.State.ExitCode}}, Error: {{.State.Error}}' || true
+          echo "--- Logs ---"
+          docker logs llm-gateway-test 2>&1 || true
+          echo "--- Files in /app ---"
+          docker exec llm-gateway-test ls -la /app/ || true
+          echo "--- /app/static/ ---"
+          docker exec llm-gateway-test ls -la /app/static/ || echo "static/ dir missing!"
+
       - name: Wait for gateway to be healthy
         run: |
           echo "Waiting for LLM Gateway to start..."
@@ -62,13 +77,6 @@ jobs:
             if curl -sf http://localhost:4000/health > /dev/null 2>&1; then
               echo "✓ Gateway is up (attempt $i)"
               break
-            fi
-            # Print early logs on first attempt for debugging
-            if [ "$i" -eq 1 ]; then
-              sleep 3
-              echo "--- Container logs so far ---"
-              docker logs llm-gateway-test 2>&1 || true
-              echo "--- End logs ---"
             fi
             if [ "$i" -eq 30 ]; then
               echo "✗ Timed out waiting for gateway"
