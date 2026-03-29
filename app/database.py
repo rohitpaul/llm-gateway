@@ -20,74 +20,94 @@ import aiosqlite
 from app import config
 
 # ---------------------------------------------------------------------------
-# SQL: table creation
+# Schema versioning & migrations
 # ---------------------------------------------------------------------------
 
-_CREATE_VIRTUAL_KEYS = """
-CREATE TABLE IF NOT EXISTS virtual_keys (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    name            TEXT    NOT NULL,
-    key_hash        TEXT    NOT NULL UNIQUE,
-    key_prefix      TEXT    NOT NULL,
-    provider_filter TEXT,
-    model_filter    TEXT,
-    is_active       INTEGER NOT NULL DEFAULT 1,
-    created_at      TEXT    NOT NULL DEFAULT (CURRENT_TIMESTAMP),
-    last_used_at    TEXT,
-    request_count   INTEGER NOT NULL DEFAULT 0,
-    token_limit     INTEGER,
-    tokens_used     INTEGER NOT NULL DEFAULT 0
+# Current schema version — bump when adding migrations.
+SCHEMA_VERSION = 1
+
+_CREATE_SCHEMA_META = """
+CREATE TABLE IF NOT EXISTS _schema_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
 """
 
-_CREATE_REQUESTS = """
-CREATE TABLE IF NOT EXISTS requests (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    virtual_key_id    INTEGER,
-    request_id        TEXT    NOT NULL,
-    model             TEXT    NOT NULL,
-    provider          TEXT    NOT NULL,
-    input_tokens      INTEGER NOT NULL DEFAULT 0,
-    output_tokens     INTEGER NOT NULL DEFAULT 0,
-    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
-    cache_write_tokens INTEGER NOT NULL DEFAULT 0,
-    cost              REAL    NOT NULL DEFAULT 0.0,
-    latency_ms        REAL    NOT NULL DEFAULT 0.0,
-    status            TEXT    NOT NULL DEFAULT 'success',
-    error_message     TEXT,
-    source_ip         TEXT,
-    request_body      TEXT,
-    response_body     TEXT,
-    created_at        TEXT    NOT NULL DEFAULT (CURRENT_TIMESTAMP),
-    FOREIGN KEY (virtual_key_id) REFERENCES virtual_keys(id)
-);
-"""
-
-_CREATE_DAILY_USAGE = """
-CREATE TABLE IF NOT EXISTS daily_usage (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    date            TEXT    NOT NULL,
-    virtual_key_id  INTEGER,
-    model           TEXT    NOT NULL,
-    provider        TEXT    NOT NULL,
-    request_count   INTEGER NOT NULL DEFAULT 0,
-    input_tokens    INTEGER NOT NULL DEFAULT 0,
-    output_tokens   INTEGER NOT NULL DEFAULT 0,
-    cost            REAL    NOT NULL DEFAULT 0.0,
-    UNIQUE(date, virtual_key_id, model, provider)
-);
-"""
-
-# Helpful indexes
-_CREATE_INDEXES = [
-    "CREATE INDEX IF NOT EXISTS idx_virtual_keys_key_hash ON virtual_keys(key_hash);",
-    "CREATE INDEX IF NOT EXISTS idx_requests_virtual_key_id ON requests(virtual_key_id);",
-    "CREATE INDEX IF NOT EXISTS idx_requests_created_at ON requests(created_at);",
-    "CREATE INDEX IF NOT EXISTS idx_requests_model ON requests(model);",
-    "CREATE INDEX IF NOT EXISTS idx_requests_provider ON requests(provider);",
-    "CREATE INDEX IF NOT EXISTS idx_daily_usage_date ON daily_usage(date);",
-    "CREATE INDEX IF NOT EXISTS idx_daily_usage_key ON daily_usage(virtual_key_id);",
-]
+# v1: Initial schema — the three core tables + indexes.
+# Tables are created with IF NOT EXISTS so fresh DBs and pre-existing DBs
+# both converge safely.
+_MIGRATIONS: dict[int, list[str]] = {
+    1: [
+        # -- virtual_keys --
+        """
+        CREATE TABLE IF NOT EXISTS virtual_keys (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            name            TEXT    NOT NULL,
+            key_hash        TEXT    NOT NULL UNIQUE,
+            key_prefix      TEXT    NOT NULL,
+            provider_filter TEXT,
+            model_filter    TEXT,
+            is_active       INTEGER NOT NULL DEFAULT 1,
+            created_at      TEXT    NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+            last_used_at    TEXT,
+            request_count   INTEGER NOT NULL DEFAULT 0,
+            token_limit     INTEGER,
+            tokens_used     INTEGER NOT NULL DEFAULT 0
+        );
+        """,
+        # -- requests --
+        """
+        CREATE TABLE IF NOT EXISTS requests (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            virtual_key_id    INTEGER,
+            request_id        TEXT    NOT NULL,
+            model             TEXT    NOT NULL,
+            provider          TEXT    NOT NULL,
+            input_tokens      INTEGER NOT NULL DEFAULT 0,
+            output_tokens     INTEGER NOT NULL DEFAULT 0,
+            cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+            cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+            cost              REAL    NOT NULL DEFAULT 0.0,
+            latency_ms        REAL    NOT NULL DEFAULT 0.0,
+            status            TEXT    NOT NULL DEFAULT 'success',
+            error_message     TEXT,
+            source_ip         TEXT,
+            request_body      TEXT,
+            response_body     TEXT,
+            created_at        TEXT    NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+            FOREIGN KEY (virtual_key_id) REFERENCES virtual_keys(id)
+        );
+        """,
+        # -- daily_usage --
+        """
+        CREATE TABLE IF NOT EXISTS daily_usage (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            date            TEXT    NOT NULL,
+            virtual_key_id  INTEGER,
+            model           TEXT    NOT NULL,
+            provider        TEXT    NOT NULL,
+            request_count   INTEGER NOT NULL DEFAULT 0,
+            input_tokens    INTEGER NOT NULL DEFAULT 0,
+            output_tokens   INTEGER NOT NULL DEFAULT 0,
+            cost            REAL    NOT NULL DEFAULT 0.0,
+            UNIQUE(date, virtual_key_id, model, provider)
+        );
+        """,
+        # -- indexes --
+        "CREATE INDEX IF NOT EXISTS idx_virtual_keys_key_hash ON virtual_keys(key_hash);",
+        "CREATE INDEX IF NOT EXISTS idx_requests_virtual_key_id ON requests(virtual_key_id);",
+        "CREATE INDEX IF NOT EXISTS idx_requests_created_at ON requests(created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_requests_model ON requests(model);",
+        "CREATE INDEX IF NOT EXISTS idx_requests_provider ON requests(provider);",
+        "CREATE INDEX IF NOT EXISTS idx_daily_usage_date ON daily_usage(date);",
+        "CREATE INDEX IF NOT EXISTS idx_daily_usage_key ON daily_usage(virtual_key_id);",
+    ],
+    # --- Example: how to add v2 ---
+    # 2: [
+    #     "ALTER TABLE requests ADD COLUMN finish_reason TEXT;",
+    #     "CREATE INDEX IF NOT EXISTS idx_requests_finish_reason ON requests(finish_reason);",
+    # ],
+}
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +140,7 @@ class Database:
     # -- lifecycle -----------------------------------------------------------
 
     async def connect(self) -> None:
-        """Open the database connection and ensure tables exist."""
+        """Open the database connection, create meta table, run pending migrations."""
         # Guarantee parent directory exists.
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -129,13 +149,32 @@ class Database:
         await self._db.execute("PRAGMA journal_mode=WAL;")
         await self._db.execute("PRAGMA foreign_keys=ON;")
 
-        # Create tables & indexes
-        await self._db.executescript(_CREATE_VIRTUAL_KEYS)
-        await self._db.executescript(_CREATE_REQUESTS)
-        await self._db.executescript(_CREATE_DAILY_USAGE)
-        for idx_sql in _CREATE_INDEXES:
-            await self._db.execute(idx_sql)
-        await self._db.commit()
+        # Ensure _schema_meta table exists (unversioned — always created).
+        await self._db.executescript(_CREATE_SCHEMA_META)
+
+        # Read current version from DB (0 = fresh / pre-migration DB).
+        async with self._db.execute(
+            "SELECT value FROM _schema_meta WHERE key = 'version'"
+        ) as cur:
+            row = await cur.fetchone()
+        current_version = int(row["value"]) if row else 0
+
+        # Run all migrations from current_version+1 up to SCHEMA_VERSION.
+        for v in range(current_version + 1, SCHEMA_VERSION + 1):
+            statements = _MIGRATIONS.get(v, [])
+            for stmt in statements:
+                await self._db.execute(stmt)
+            await self._db.execute(
+                "INSERT OR REPLACE INTO _schema_meta (key, value) VALUES ('version', ?)",
+                (str(v),),
+            )
+            await self._db.commit()
+            print(f"  DB migration v{v} applied")
+
+        if current_version < SCHEMA_VERSION:
+            print(f"✓ DB schema: v{current_version} → v{SCHEMA_VERSION}")
+        else:
+            print(f"✓ DB schema: v{SCHEMA_VERSION} (up to date)")
 
     async def close(self) -> None:
         """Close the database connection."""
