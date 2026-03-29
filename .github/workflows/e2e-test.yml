@@ -1,0 +1,176 @@
+name: E2E Test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'templates/**'
+      - 'static/**'
+      - 'Dockerfile'
+      - 'pyproject.toml'
+      - 'config.yaml'
+      - '.github/workflows/e2e-test.yml'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  GATEWAY_ADMIN_KEY: sk-test-admin-key-e2e
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build LLM Gateway image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          tags: llm-gateway:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start LLM Gateway container
+        run: |
+          docker run -d \
+            --name llm-gateway-test \
+            -p 4000:4000 \
+            -e GATEWAY_ADMIN_KEY=${{ env.GATEWAY_ADMIN_KEY }} \
+            -e GATEWAY_DB=/data/gateway.db \
+            llm-gateway:test
+
+      - name: Wait for gateway to be healthy
+        run: |
+          echo "Waiting for LLM Gateway to start..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:4000/health > /dev/null 2>&1; then
+              echo "✓ Gateway is up (attempt $i)"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "✗ Timed out waiting for gateway"
+              docker logs llm-gateway-test
+              exit 1
+            fi
+            echo "  Waiting... (attempt $i/30)"
+            sleep 2
+          done
+
+      - name: Test /health endpoint
+        run: |
+          RESPONSE=$(curl -sf http://localhost:4000/health)
+          echo "Response: $RESPONSE"
+          echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('status') == 'ok'; print('✓ /health returned ok')"
+
+      - name: Test dashboard (/)
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/)
+          if [ "$STATUS" -ne 200 ]; then
+            echo "✗ Dashboard returned $STATUS, expected 200"
+            exit 1
+          fi
+          BODY=$(curl -sf http://localhost:4000/)
+          echo "$BODY" | grep -qi "html\|gateway\|dashboard" && echo "✓ Dashboard HTML served" || echo "⚠ Dashboard response missing expected content"
+          echo "  First 200 chars: $(echo "$BODY" | head -c 200)"
+
+      - name: Test /v1/models (unauthenticated)
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/v1/models)
+          echo "/v1/models returned $STATUS"
+          # May require auth or may return empty list — just check it doesn't crash
+          if [ "$STATUS" -eq 500 ]; then
+            echo "✗ /v1/models crashed with 500"
+            exit 1
+          fi
+          echo "✓ /v1/models returned $STATUS (no crash)"
+
+      - name: Test admin key creation
+        run: |
+          # Create a virtual key via admin API
+          RESPONSE=$(curl -sf -X POST http://localhost:4000/admin/keys \
+            -H "Authorization: Bearer ${{ env.GATEWAY_ADMIN_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"name": "e2e-test-key"}')
+          echo "Create key response: $RESPONSE"
+          KEY=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('key',''))" 2>/dev/null || true)
+          if [ -z "$KEY" ]; then
+            echo "✗ Failed to create virtual key"
+            exit 1
+          fi
+          echo "✓ Virtual key created: ${KEY:0:10}..."
+          echo "$KEY" > /tmp/test-virtual-key.txt
+
+      - name: Test admin key listing
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ env.GATEWAY_ADMIN_KEY }}" \
+            http://localhost:4000/admin/keys)
+          if [ "$STATUS" -ne 200 ]; then
+            echo "✗ Key listing returned $STATUS, expected 200"
+            exit 1
+          fi
+          RESPONSE=$(curl -sf -H "Authorization: Bearer ${{ env.GATEWAY_ADMIN_KEY }}" \
+            http://localhost:4000/admin/keys)
+          COUNT=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d) if isinstance(d, list) else d.get('total', len(d.get('keys', d.get('data', [])))))")
+          echo "✓ Listed keys, count: $COUNT"
+
+      - name: Test admin stats endpoints
+        run: |
+          for endpoint in summary models providers daily; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${{ env.GATEWAY_ADMIN_KEY }}" \
+              "http://localhost:4000/api/stats/$endpoint")
+            if [ "$STATUS" -ne 200 ]; then
+              echo "✗ /api/stats/$endpoint returned $STATUS"
+              exit 1
+            fi
+            echo "✓ /api/stats/$endpoint returned 200"
+          done
+
+      - name: Test provider health endpoint
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/api/health/providers)
+          if [ "$STATUS" -ne 200 ]; then
+            echo "✗ Provider health returned $STATUS, expected 200"
+            exit 1
+          fi
+          echo "✓ /api/health/providers returned 200"
+
+      - name: Test admin auth rejection (bad key)
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer sk-wrong-key" \
+            http://localhost:4000/admin/keys)
+          if [ "$STATUS" -ne 401 ] && [ "$STATUS" -ne 403 ]; then
+            echo "✗ Bad key returned $STATUS, expected 401/403"
+            exit 1
+          fi
+          echo "✓ Bad admin key correctly rejected with $STATUS"
+
+      - name: Test static assets
+        run: |
+          # Check that static files path responds (JS/CSS)
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/static/css/style.css 2>/dev/null || echo "000")
+          if [ "$STATUS" = "200" ] || [ "$STATUS" = "304" ]; then
+            echo "✓ Static CSS accessible"
+          else
+            echo "ℹ Static CSS returned $STATUS (may not exist as separate file)"
+          fi
+
+      - name: Print container logs
+        if: always()
+        run: docker logs llm-gateway-test 2>&1 | tail -40
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker stop llm-gateway-test 2>/dev/null || true
+          docker rm llm-gateway-test 2>/dev/null || true
