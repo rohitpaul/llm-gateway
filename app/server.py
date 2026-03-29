@@ -251,6 +251,16 @@ async def list_models():
 async def health():
     return {"status": "ok", "version": "0.1.0"}
 
+@app.post("/api/auth/verify")
+async def auth_verify(request: Request):
+    """Verify admin credentials. Returns success if valid."""
+    try:
+        admin = await verify_admin(request)
+        return {"valid": True, "name": admin.get("name", "admin")}
+    except HTTPException:
+        return JSONResponse(content={"valid": False}, status_code=401)
+
+
 
 # ---------------------------------------------------------------------------
 # Admin API — key management

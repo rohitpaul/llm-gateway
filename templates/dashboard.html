@@ -17,15 +17,47 @@
 </head>
 <body class="bg-gray-950 text-gray-100 min-h-screen" x-data="gateway()" x-init="init()">
 
+
+<!-- Login Screen -->
+<div x-show="!authenticated" x-cloak class="min-h-screen flex items-center justify-center">
+    <div class="bg-gray-900 rounded-xl p-8 border border-gray-800 w-full max-w-sm">
+        <div class="flex items-center gap-3 mb-6">
+            <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center font-bold text-lg">G</div>
+            <div>
+                <h1 class="text-xl font-semibold text-gray-100">LLM Gateway</h1>
+                <p class="text-xs text-gray-500">Sign in to access the dashboard</p>
+            </div>
+        </div>
+        <div x-show="loginError" x-cloak class="bg-red-900/20 border border-red-800 rounded-lg px-3 py-2 mb-4 text-sm text-red-400" x-text="loginError"></div>
+        <form @submit.prevent="login()">
+            <label class="text-xs text-gray-400 block mb-1.5">Admin Key</label>
+            <input x-model="loginKey" :type="showLoginKey ? 'text' : 'password'" placeholder="Enter your admin key"
+                   @keydown.enter="login()"
+                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 mb-4 font-mono"
+                   x-ref="loginInput">
+            <div class="flex items-center gap-2 mb-4">
+                <input type="checkbox" x-model="showLoginKey" class="rounded border-gray-600 bg-gray-800">
+                <span class="text-xs text-gray-400">Show key</span>
+            </div>
+            <button type="submit" :disabled="loginLoading"
+                    class="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2.5 rounded-lg text-sm font-medium transition">
+                <span x-show="!loginLoading">Sign In</span>
+                <span x-show="loginLoading">Verifying...</span>
+            </button>
+        </form>
+    </div>
+</div>
+
 <!-- Header -->
-<header class="border-b border-gray-800 px-6 py-4">
+<header x-show="authenticated" x-cloak class="border-b border-gray-800 px-6 py-4">
     <div class="max-w-7xl mx-auto flex items-center justify-between">
         <div class="flex items-center gap-3">
             <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center font-bold text-sm">G</div>
             <h1 class="text-xl font-semibold">LLM Gateway</h1>
             <span class="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded" x-text="summary.total_requests + ' requests'"></span>
         </div>
-        <div class="flex gap-4 text-sm">
+        <div class="flex items-center gap-4 text-sm">
+            <button @click="signOut()" class="text-gray-500 hover:text-gray-300 text-xs border border-gray-700 rounded px-2 py-1 hover:border-gray-500 transition">Sign out</button>
             <div class="text-center">
                 <div class="text-gray-400 text-xs">Cost</div>
                 <div class="font-mono text-green-400" x-text="'$' + (summary.total_cost || 0).toFixed(4)">$0</div>
@@ -43,7 +75,7 @@
 </header>
 
 <!-- Tabs -->
-<nav class="border-b border-gray-800 px-6">
+<nav x-show="authenticated" x-cloak class="border-b border-gray-800 px-6">
     <div class="max-w-7xl mx-auto flex gap-6 text-sm">
         <button @click="tab='stats'" :class="tab==='stats' ? 'tab-active py-3 font-medium' : 'py-3 text-gray-400 hover:text-gray-200'">Stats</button>
         <button @click="tab='requests'" :class="tab==='requests' ? 'tab-active py-3 font-medium' : 'py-3 text-gray-400 hover:text-gray-200'">Requests</button>
@@ -52,7 +84,7 @@
 </nav>
 
 <!-- Content -->
-<main class="max-w-7xl mx-auto px-6 py-6">
+<main x-show="authenticated" x-cloak class="max-w-7xl mx-auto px-6 py-6">
 
     <!-- Stats Tab -->
     <div x-show="tab==='stats'" x-cloak class="fade-in space-y-6">
@@ -263,17 +295,91 @@ function gateway() {
         keys: [],
         newKey: { name: '', provider_filter: '', model_filter: '', token_limit: '' },
         createdKey: null,
-        adminKey: localStorage.getItem('gateway_admin_key') || '',
+
+        // Auth state
+        authenticated: false,
+        adminKey: '',
+        loginKey: '',
+        loginError: '',
+        loginLoading: false,
+        showLoginKey: false,
+        _refreshInterval: null,
 
         async init() {
-            // Prompt for admin key if not set
-            if (!this.adminKey) {
-                this.adminKey = prompt('Enter admin key (GATEWAY_ADMIN_KEY):') || '';
-                if (this.adminKey) localStorage.setItem('gateway_admin_key', this.adminKey);
+            const saved = localStorage.getItem('gateway_admin_key');
+            if (saved) {
+                this.adminKey = saved;
+                const valid = await this.verifyKey(saved);
+                if (valid) {
+                    this.authenticated = true;
+                    await this.loadAll();
+                    this._refreshInterval = setInterval(() => this.loadAll(), 10000);
+                    return;
+                }
+                // Saved key is invalid, clear it
+                localStorage.removeItem('gateway_admin_key');
+                this.adminKey = '';
             }
-            await this.loadAll();
-            // Auto-refresh every 10s
-            setInterval(() => this.loadAll(), 10000);
+            // Not authenticated — focus the login input after Alpine renders
+            this.$nextTick(() => {
+                if (this.$refs.loginInput) this.$refs.loginInput.focus();
+            });
+        },
+
+        async verifyKey(key) {
+            try {
+                const r = await fetch('/api/auth/verify', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ' + key,
+                        'Content-Type': 'application/json',
+                    },
+                });
+                return r.ok;
+            } catch {
+                return false;
+            }
+        },
+
+        async login() {
+            this.loginError = '';
+            this.loginLoading = true;
+            const key = this.loginKey.trim();
+            if (!key) {
+                this.loginError = 'Please enter an admin key';
+                this.loginLoading = false;
+                return;
+            }
+            const valid = await this.verifyKey(key);
+            this.loginLoading = false;
+            if (valid) {
+                this.adminKey = key;
+                localStorage.setItem('gateway_admin_key', key);
+                this.authenticated = true;
+                this.loginKey = '';
+                this.loginError = '';
+                await this.loadAll();
+                this._refreshInterval = setInterval(() => this.loadAll(), 10000);
+            } else {
+                this.loginError = 'Invalid admin key';
+            }
+        },
+
+        signOut() {
+            this.authenticated = false;
+            this.adminKey = '';
+            localStorage.removeItem('gateway_admin_key');
+            if (this._refreshInterval) clearInterval(this._refreshInterval);
+            this.summary = {};
+            this.modelStats = [];
+            this.providerStats = [];
+            this.requests = [];
+            this.keys = [];
+            this.loginKey = '';
+            this.loginError = '';
+            this.$nextTick(() => {
+                if (this.$refs.loginInput) this.$refs.loginInput.focus();
+            });
         },
 
         headers() {
@@ -281,6 +387,17 @@ function gateway() {
                 'Authorization': 'Bearer ' + this.adminKey,
                 'Content-Type': 'application/json',
             };
+        },
+
+        // Wrapper for API fetches that handles 401 by showing login
+        async apiFetch(url, options = {}) {
+            options.headers = { ...this.headers(), ...(options.headers || {}) };
+            const r = await fetch(url, options);
+            if (r.status === 401 || r.status === 403) {
+                this.signOut();
+                throw new Error('Unauthorized');
+            }
+            return r;
         },
 
         async loadAll() {
@@ -295,28 +412,28 @@ function gateway() {
 
         async loadSummary() {
             try {
-                const r = await fetch('/api/stats/summary', { headers: this.headers() });
+                const r = await this.apiFetch('/api/stats/summary');
                 if (r.ok) this.summary = await r.json();
             } catch {}
         },
 
         async loadModelStats() {
             try {
-                const r = await fetch('/api/stats/models', { headers: this.headers() });
+                const r = await this.apiFetch('/api/stats/models');
                 if (r.ok) this.modelStats = (await r.json()).models || [];
             } catch {}
         },
 
         async loadProviderStats() {
             try {
-                const r = await fetch('/api/stats/providers', { headers: this.headers() });
+                const r = await this.apiFetch('/api/stats/providers');
                 if (r.ok) this.providerStats = (await r.json()).providers || [];
             } catch {}
         },
 
         async loadRequests() {
             try {
-                const r = await fetch(`/api/requests?limit=50&offset=${this.requestsOffset}`, { headers: this.headers() });
+                const r = await this.apiFetch(`/api/requests?limit=50&offset=${this.requestsOffset}`);
                 if (r.ok) {
                     const d = await r.json();
                     this.requests = d.requests || [];
@@ -327,7 +444,7 @@ function gateway() {
 
         async loadKeys() {
             try {
-                const r = await fetch('/admin/keys', { headers: this.headers() });
+                const r = await this.apiFetch('/admin/keys');
                 if (r.ok) this.keys = (await r.json()).keys || [];
             } catch {}
         },
@@ -338,30 +455,35 @@ function gateway() {
             if (this.newKey.model_filter) body.model_filter = this.newKey.model_filter;
             if (this.newKey.token_limit) body.token_limit = parseInt(this.newKey.token_limit);
 
-            const r = await fetch('/admin/keys', {
-                method: 'POST',
-                headers: this.headers(),
-                body: JSON.stringify(body),
-            });
-            if (r.ok) {
-                this.createdKey = await r.json();
-                this.newKey = { name: '', provider_filter: '', model_filter: '', token_limit: '' };
-                await this.loadKeys();
-            } else {
-                const err = await r.json();
-                alert(err.detail || 'Failed to create key');
-            }
+            try {
+                const r = await this.apiFetch('/admin/keys', {
+                    method: 'POST',
+                    body: JSON.stringify(body),
+                });
+                if (r.ok) {
+                    this.createdKey = await r.json();
+                    this.newKey = { name: '', provider_filter: '', model_filter: '', token_limit: '' };
+                    await this.loadKeys();
+                } else {
+                    const err = await r.json();
+                    alert(err.detail || 'Failed to create key');
+                }
+            } catch {}
         },
 
         async deactivateKey(id) {
-            await fetch(`/admin/keys/${id}/deactivate`, { method: 'POST', headers: this.headers() });
-            await this.loadKeys();
+            try {
+                await this.apiFetch(`/admin/keys/${id}/deactivate`, { method: 'POST' });
+                await this.loadKeys();
+            } catch {}
         },
 
         async deleteKey(id) {
             if (!confirm('Delete this key? This cannot be undone.')) return;
-            await fetch(`/admin/keys/${id}`, { method: 'DELETE', headers: this.headers() });
-            await this.loadKeys();
+            try {
+                await this.apiFetch(`/admin/keys/${id}`, { method: 'DELETE' });
+                await this.loadKeys();
+            } catch {}
         },
 
         formatTokens(n) {
