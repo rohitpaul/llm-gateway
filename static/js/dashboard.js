@@ -262,7 +262,7 @@ function gateway() {
                 this.chartInstances.tokens.render();
             }
 
-            // Cost chart — stacked bar (input/output tokens) + line (cost)
+            // Output tokens chart — bar (output tokens) + line (cost)
             const costEl = document.getElementById('chartCost');
             if (costEl) {
                 if (this.chartInstances.cost) this.chartInstances.cost.destroy();
@@ -273,15 +273,9 @@ function gateway() {
                         background: 'transparent',
                         toolbar: { show: false },
                         fontFamily: 'inherit',
-                        stacked: true,
                         animations: { enabled: false },
                     },
                     series: [
-                        {
-                            name: 'Input Tokens (K)',
-                            type: 'column',
-                            data: dates.map(d => (dayMap[d].input_tokens || 0) / 1000),
-                        },
                         {
                             name: 'Output Tokens (K)',
                             type: 'column',
@@ -291,21 +285,20 @@ function gateway() {
                             name: 'Cost ($)',
                             type: 'line',
                             data: dates.map(d => dayMap[d].cost),
-                            yaxis: 2,
                         },
                     ],
-                    colors: ['#22c55e', '#fbbf24', '#f87171'],
-                    stroke: { width: [0, 0, 2], curve: 'smooth' },
+                    colors: ['#fbbf24', '#f87171'],
+                    stroke: { width: [0, 2], curve: 'smooth' },
                     plotOptions: { bar: { borderRadius: 3, columnWidth: '55%' } },
                     dataLabels: { enabled: false },
                     xaxis: {
                         categories: labels,
                         axisBorder: { show: false },
                         axisTicks: { show: false },
-                        labels: { style: { color: '#9ca3af', fontSize: '10px' } },
+                        labels: { style: { colors: '#9ca3af', fontSize: '10px' } },
                     },
                     yaxis: [
-                        { title: { text: 'Tokens (K)', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' } } },
+                        { title: { text: 'Output Tokens (K)', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' } } },
                         { opposite: true, title: { text: 'Cost ($)', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' }, formatter: v => '$' + (v || 0).toFixed(4) } },
                     ],
                     grid: { borderColor: 'rgba(255,255,255,0.06)', strokeDashArray: 3 },
