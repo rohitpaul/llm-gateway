@@ -41,6 +41,7 @@
                     <span class="text-gray-600">|</span>
                     <select x-model.number="requestsPerPage" @change="requestsOffset = 0; loadRequests()"
                             class="bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 text-xs text-gray-300 focus:outline-none focus:border-blue-500">
+                        <option value="10">10 / page</option>
                         <option value="25">25 / page</option>
                         <option value="50">50 / page</option>
                         <option value="100">100 / page</option>

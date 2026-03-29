@@ -7,7 +7,7 @@ function gateway() {
         requests: [],
         requestsTotal: 0,
         requestsOffset: 0,
-        requestsPerPage: 50,
+        requestsPerPage: 10,
         keys: [],
         newKey: { name: '', provider_filter: '', model_filter: '', token_limit: '' },
         createdKey: null,
