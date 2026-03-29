@@ -226,6 +226,14 @@ class Database:
         await self.db.commit()
         return cursor.rowcount > 0
 
+    async def reactivate_key(self, key_id: int) -> bool:
+        """Set is_active=1 for the given key. Returns True if a row was updated."""
+        cursor = await self.db.execute(
+            "UPDATE virtual_keys SET is_active = 1 WHERE id = ?", (key_id,)
+        )
+        await self.db.commit()
+        return cursor.rowcount > 0
+
     async def delete_key(self, key_id: int) -> bool:
         """Delete a virtual key. Soft-deletes (deactivates) if it has request history."""
         # Check if key has any requests (FK constraint prevents hard delete)

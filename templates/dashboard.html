@@ -374,6 +374,7 @@
                             </td>
                             <td class="px-4 py-1 text-right" data-label="">
                                 <button x-show="k.is_active" @click="deactivateKey(k.id)" class="text-yellow-500 hover:text-yellow-400 text-xs">pause</button>
+                                <button x-show="!k.is_active" @click="reactivateKey(k.id)" class="text-blue-400 hover:text-blue-300 text-xs">resume</button>
                                 <button @click="deleteKey(k.id)" class="text-red-500 hover:text-red-400 text-xs ml-2">delete</button>
                             </td>
                         </tr>
@@ -803,6 +804,13 @@ function gateway() {
         async deactivateKey(id) {
             try {
                 await this.apiFetch(`/admin/keys/${id}/deactivate`, { method: 'POST' });
+                await this.loadKeys();
+            } catch {}
+        },
+
+        async reactivateKey(id) {
+            try {
+                await this.apiFetch(`/admin/keys/${id}/reactivate`, { method: 'POST' });
                 await this.loadKeys();
             } catch {}
         },

@@ -348,6 +348,15 @@ async def deactivate_key(key_id: int, admin: dict = Depends(verify_admin)):
     return {"ok": True}
 
 
+@app.post("/admin/keys/{key_id}/reactivate")
+async def reactivate_key(key_id: int, admin: dict = Depends(verify_admin)):
+    """Reactivate a deactivated virtual key."""
+    ok = await db.reactivate_key(key_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Key not found")
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------------------
 # Stats API
 # ---------------------------------------------------------------------------
