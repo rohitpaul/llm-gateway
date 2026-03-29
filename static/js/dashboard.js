@@ -209,7 +209,7 @@ function gateway() {
                 return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
             });
 
-            // Tokens chart — bar (requests) + line (tokens K)
+            // Tokens chart — stacked bar (input/output tokens) + line (requests)
             const tokEl = document.getElementById('chartTokens');
             if (tokEl) {
                 if (this.chartInstances.tokens) this.chartInstances.tokens.destroy();
@@ -220,23 +220,28 @@ function gateway() {
                         background: 'transparent',
                         toolbar: { show: false },
                         fontFamily: 'inherit',
+                        stacked: true,
                         animations: { enabled: false },
                     },
                     series: [
                         {
-                            name: 'Requests',
+                            name: 'Input Tokens (K)',
                             type: 'column',
-                            data: dates.map(d => dayMap[d].requests),
+                            data: dates.map(d => (dayMap[d].input_tokens || 0) / 1000),
                         },
                         {
-                            name: 'Tokens (K)',
+                            name: 'Output Tokens (K)',
+                            type: 'column',
+                            data: dates.map(d => (dayMap[d].output_tokens || 0) / 1000),
+                        },
+                        {
+                            name: 'Requests',
                             type: 'line',
-                            data: dates.map(d => ((dayMap[d].input_tokens || 0) + (dayMap[d].output_tokens || 0)) / 1000),
-                            yaxis: 2,
+                            data: dates.map(d => dayMap[d].requests),
                         },
                     ],
-                    colors: ['#3b82f6', '#a78bfa'],
-                    stroke: { width: [0, 2], curve: 'smooth' },
+                    colors: ['#3b82f6', '#a78bfa', '#34d399'],
+                    stroke: { width: [0, 0, 2], curve: 'smooth' },
                     plotOptions: { bar: { borderRadius: 3, columnWidth: '55%' } },
                     dataLabels: { enabled: false },
                     xaxis: {
@@ -246,8 +251,8 @@ function gateway() {
                         labels: { style: { color: '#9ca3af', fontSize: '10px' } },
                     },
                     yaxis: [
-                        { title: { text: 'Requests', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' } } },
-                        { opposite: true, title: { text: 'Tokens (K)', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' } } },
+                        { title: { text: 'Tokens (K)', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' } } },
+                        { opposite: true, title: { text: 'Requests', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' } } },
                     ],
                     grid: { borderColor: 'rgba(255,255,255,0.06)', strokeDashArray: 3 },
                     legend: { labels: { colors: '#d1d5db' }, fontSize: '11px' },
