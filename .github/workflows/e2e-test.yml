@@ -30,7 +30,7 @@ jobs:
           python-version: '3.13'
 
       - name: Install dependencies
-        run: pip install fastapi "uvicorn[standard]" httpx aiosqlite pyyaml python-dotenv pydantic
+        run: pip install "fastapi[standard]" "uvicorn[standard]" httpx aiosqlite pyyaml python-dotenv pydantic
 
       - name: Create minimal config
         run: |

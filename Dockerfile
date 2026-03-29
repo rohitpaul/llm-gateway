@@ -6,7 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir fastapi uvicorn[standard] httpx aiosqlite pyyaml python-dotenv pydantic
+RUN pip install --no-cache-dir fastapi[standard] uvicorn[standard] httpx aiosqlite pyyaml python-dotenv pydantic
 
 COPY app/ app/
 COPY templates/ templates/
