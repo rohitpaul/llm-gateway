@@ -38,13 +38,15 @@ jobs:
 
       - name: Start server in background
         run: |
-          uvicorn app.server:app --host 127.0.0.1 --port 4000 &
+          uvicorn app.server:app --host 127.0.0.1 --port 4000 > /tmp/server.log 2>&1 &
           SERVER_PID=$!
           echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
           sleep 5
           if ! kill -0 $SERVER_PID 2>/dev/null; then
-            echo "Server crashed on startup!"
-            wait $SERVER_PID 2>/dev/null || true
+            echo "## Server crashed on startup" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat /tmp/server.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
           echo "Server started with PID $SERVER_PID"
@@ -158,11 +160,29 @@ jobs:
 
       - name: Verify image has all files
         run: |
-          echo "== Checking /app contents =="
-          docker run --rm llm-gateway:test ls -la /app/
-          echo "== Checking /app/static =="
-          docker run --rm llm-gateway:test ls -la /app/static/
-          echo "== Checking /app/templates =="
-          docker run --rm llm-gateway:test ls -la /app/templates/
-          echo "== Verifying Python imports =="
-          docker run --rm -e GATEWAY_DB=/tmp/test.db llm-gateway:test python3 -c "import app.server; print('Import OK')"
+          {
+            echo "## Docker image contents"
+            echo '```'
+            docker run --rm llm-gateway:test ls -la /app/
+            echo '```'
+            echo "## /app/static"
+            echo '```'
+            docker run --rm llm-gateway:test ls -la /app/static/ || echo "MISSING"
+            echo '```'
+            echo "## /app/templates"
+            echo '```'
+            docker run --rm llm-gateway:test ls -la /app/templates/
+            echo '```'
+            echo "## Python import test"
+            echo '```'
+            docker run --rm -e GATEWAY_DB=/tmp/test.db llm-gateway:test python3 -c "
+          import traceback, sys
+          try:
+              import app.server
+              print('Import OK')
+          except Exception:
+              traceback.print_exc()
+              sys.exit(1)
+          "
+            echo '```'
+          } >> $GITHUB_STEP_SUMMARY
