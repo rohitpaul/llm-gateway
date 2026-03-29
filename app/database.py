@@ -266,6 +266,7 @@ class Database:
         response_body: str | None = None,
     ) -> int:
         """Insert a request log row. Returns the new row id."""
+        # Single transaction: insert request, update key usage, upsert daily — one commit.
         async with self.db.execute(
             """
             INSERT INTO requests (
@@ -285,7 +286,6 @@ class Database:
             ),
         ) as cursor:
             inserted_id = cursor.lastrowid
-        await self.db.commit()
 
         # Update tokens_used on the parent key.
         if virtual_key_id is not None:
@@ -295,7 +295,6 @@ class Database:
                     "UPDATE virtual_keys SET tokens_used = tokens_used + ? WHERE id = ?",
                     (total, virtual_key_id),
                 )
-                await self.db.commit()
 
         # Upsert daily_usage.
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -313,8 +312,9 @@ class Database:
             """,
             (today, virtual_key_id, model, provider, input_tokens, output_tokens, cost),
         )
-        await self.db.commit()
 
+        # Single commit for all three operations.
+        await self.db.commit()
         return inserted_id if inserted_id else -1
 
     async def get_requests(
