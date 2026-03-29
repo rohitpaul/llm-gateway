@@ -60,15 +60,26 @@ jobs:
 
       - name: Debug - container status and logs (early)
         run: |
-          sleep 3
-          echo "Container state:"
-          docker inspect llm-gateway-test --format='Status: {{.State.Status}}, ExitCode: {{.State.ExitCode}}, Error: {{.State.Error}}' || true
-          echo "--- Logs ---"
-          docker logs llm-gateway-test 2>&1 || true
-          echo "--- Files in /app ---"
-          docker exec llm-gateway-test ls -la /app/ || true
-          echo "--- /app/static/ ---"
-          docker exec llm-gateway-test ls -la /app/static/ || echo "static/ dir missing!"
+          sleep 5
+          echo "=== Container state ===" | tee /tmp/debug.log
+          docker inspect llm-gateway-test --format='Status: {{.State.Status}}, ExitCode: {{.State.ExitCode}}, Error: {{.State.Error}}' | tee -a /tmp/debug.log || true
+          echo "=== Container logs ===" | tee -a /tmp/debug.log
+          docker logs llm-gateway-test 2>&1 | tee -a /tmp/debug.log || true
+          echo "=== Files in /app ===" | tee -a /tmp/debug.log
+          docker exec llm-gateway-test ls -la /app/ 2>&1 | tee -a /tmp/debug.log || true
+          echo "=== Files in /app/static ===" | tee -a /tmp/debug.log
+          docker exec llm-gateway-test ls -la /app/static/ 2>&1 | tee -a /tmp/debug.log || true
+          echo "=== Config file contents ===" | tee -a /tmp/debug.log
+          docker exec llm-gateway-test cat /app/config.yaml 2>&1 | tee -a /tmp/debug.log || true
+          echo "=== Curl health from inside container ===" | tee -a /tmp/debug.log
+          docker exec llm-gateway-test wget -qO- http://localhost:4000/health 2>&1 | tee -a /tmp/debug.log || true
+
+      - name: Upload debug logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-logs
+          path: /tmp/debug.log
 
       - name: Wait for gateway to be healthy
         run: |
