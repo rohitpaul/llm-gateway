@@ -7,6 +7,7 @@
                         <th class="px-4 py-3 text-left">Time</th>
                         <th class="px-4 py-3 text-left">Model</th>
                         <th class="px-4 py-3 text-left hide-mobile">Provider</th>
+                        <th class="px-4 py-3 text-left hide-mobile">API Key</th>
                         <th class="px-4 py-3 text-right">Tokens In</th>
                         <th class="px-4 py-3 text-right">Tokens Out</th>
                         <th class="px-4 py-3 text-right">Cost</th>
@@ -20,6 +21,7 @@
                             <td class="mobile-card-header px-4 py-2.5 text-gray-400 whitespace-nowrap" x-text="formatTime(r.created_at)" data-label=""></td>
                             <td class="px-4 py-1 font-mono text-xs" x-text="r.model" data-label="Model"></td>
                             <td class="px-4 py-2.5 capitalize text-gray-400 hide-mobile" x-text="r.provider" data-label="Provider"></td>
+                            <td class="px-4 py-2.5 text-gray-300 text-xs hide-mobile" :class="r.key_name ? '' : 'text-gray-600 italic'" x-text="r.key_name || '—'" data-label="API Key"></td>
                             <td class="px-4 py-1 text-right font-mono" x-text="formatTokens(r.input_tokens)" data-label="In"></td>
                             <td class="px-4 py-1 text-right font-mono" x-text="formatTokens(r.output_tokens)" data-label="Out"></td>
                             <td class="px-4 py-1 text-right font-mono text-green-400" x-text="'$' + (r.cost || 0).toFixed(4)" data-label="Cost"></td>

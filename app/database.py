@@ -411,10 +411,12 @@ class Database:
 
         # Page of results (omit large body columns)
         data_sql = (
-            f"SELECT id, virtual_key_id, request_id, model, provider, "
-            f"input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, "
-            f"cost, latency_ms, status, error_message, source_ip, created_at "
-            f"FROM requests {where} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            f"SELECT r.id, r.virtual_key_id, vk.name as key_name, r.request_id, r.model, r.provider, "
+            f"r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_write_tokens, "
+            f"r.cost, r.latency_ms, r.status, r.error_message, r.source_ip, r.created_at "
+            f"FROM requests r "
+            f"LEFT JOIN virtual_keys vk ON r.virtual_key_id = vk.id "
+            f"{where} ORDER BY r.created_at DESC LIMIT ? OFFSET ?"
         )
         async with self.db.execute(data_sql, params + [limit, offset]) as cur:
             rows = await cur.fetchall()
