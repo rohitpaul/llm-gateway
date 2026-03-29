@@ -232,6 +232,7 @@ function gateway() {
                             name: 'Tokens (K)',
                             type: 'line',
                             data: dates.map(d => ((dayMap[d].input_tokens || 0) + (dayMap[d].output_tokens || 0)) / 1000),
+                            yaxis: 2,
                         },
                     ],
                     colors: ['#3b82f6', '#a78bfa'],
@@ -242,7 +243,7 @@ function gateway() {
                         categories: labels,
                         axisBorder: { show: false },
                         axisTicks: { show: false },
-                        labels: { style: { colors: '#9ca3af', fontSize: '10px' } },
+                        labels: { style: { color: '#9ca3af', fontSize: '10px' } },
                     },
                     yaxis: [
                         { title: { text: 'Requests', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' } } },
@@ -285,6 +286,7 @@ function gateway() {
                             name: 'Cost ($)',
                             type: 'line',
                             data: dates.map(d => dayMap[d].cost),
+                            yaxis: 2,
                         },
                     ],
                     colors: ['#22c55e', '#fbbf24', '#f87171'],
@@ -295,7 +297,7 @@ function gateway() {
                         categories: labels,
                         axisBorder: { show: false },
                         axisTicks: { show: false },
-                        labels: { style: { colors: '#9ca3af', fontSize: '10px' } },
+                        labels: { style: { color: '#9ca3af', fontSize: '10px' } },
                     },
                     yaxis: [
                         { title: { text: 'Tokens (K)', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' } } },
