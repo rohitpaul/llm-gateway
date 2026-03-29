@@ -36,7 +36,8 @@ jobs:
         run: |
           printf 'models: {}\nproviders: {}\n' > config.yaml
 
-      - name: Test server startup
+      - name: Test server import
+        id: import-test
         run: |
           python3 -c "
           import sys, traceback
@@ -47,7 +48,7 @@ jobs:
           except Exception:
               traceback.print_exc()
               sys.exit(1)
-          "
+          " 2>&1 | tee /tmp/import-output.txt
 
       - name: Start server and run tests
         run: |
@@ -56,64 +57,51 @@ jobs:
           echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
           sleep 5
           if ! kill -0 $SERVER_PID 2>/dev/null; then
-            echo "::error::Server crashed on startup"
-            echo "::group::Server log"
             cat /tmp/server.log
-            echo "::endgroup::"
             exit 1
           fi
-          echo "Server started with PID $SERVER_PID"
 
-          echo "=== Test /health ==="
-          curl -sf http://localhost:4000/health || { echo "FAIL /health"; exit 1; }
+          curl -sf http://localhost:4000/health || { echo "FAIL /health"; cat /tmp/server.log; exit 1; }
           echo ""
 
-          echo "=== Test dashboard ==="
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/)
           echo "Dashboard: $STATUS"
           [ "$STATUS" = "200" ] || exit 1
 
-          echo "=== Test /v1/models ==="
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/v1/models)
           echo "/v1/models: $STATUS"
           [ "$STATUS" != "500" ]
 
-          echo "=== Test key creation ==="
           RESPONSE=$(curl -sf -X POST http://localhost:4000/admin/keys \
             -H "Authorization: Bearer ${{ env.GATEWAY_ADMIN_KEY }}" \
             -H "Content-Type: application/json" \
             -d '{"name": "e2e-test-key"}')
-          echo "Create: $RESPONSE"
+          echo "Create key: $RESPONSE"
 
-          echo "=== Test key listing ==="
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer ${{ env.GATEWAY_ADMIN_KEY }}" \
             http://localhost:4000/admin/keys)
-          echo "Key listing: $STATUS"
           [ "$STATUS" = "200" ] || exit 1
 
-          echo "=== Test stats ==="
           for ep in summary models providers daily; do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
               -H "Authorization: Bearer ${{ env.GATEWAY_ADMIN_KEY }}" \
               "http://localhost:4000/api/stats/$ep")
-            echo "  /api/stats/$ep: $STATUS"
+            echo "/api/stats/$ep: $STATUS"
             [ "$STATUS" = "200" ] || exit 1
           done
 
-          echo "=== Test provider health ==="
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/api/health/providers)
           echo "Provider health: $STATUS"
           [ "$STATUS" = "200" ] || exit 1
 
-          echo "=== Test auth rejection ==="
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer sk-wrong" \
             http://localhost:4000/admin/keys)
           echo "Auth rejection: $STATUS"
           [ "$STATUS" = "401" ] || [ "$STATUS" = "403" ] || exit 1
 
-          echo "=== ALL TESTS PASSED ==="
+          echo "ALL TESTS PASSED"
           kill $SERVER_PID 2>/dev/null || true
 
       - name: Stop server
@@ -122,6 +110,16 @@ jobs:
           if [ -n "$SERVER_PID" ]; then
             kill $SERVER_PID 2>/dev/null || true
           fi
+
+      - name: Upload diagnostic output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-python-diag
+          retention-days: 1
+          path: |
+            /tmp/import-output.txt
+            /tmp/server.log
 
   test-docker-build:
     runs-on: ubuntu-latest
@@ -146,9 +144,9 @@ jobs:
           echo "== /app =="
           docker run --rm llm-gateway:test ls -la /app/
           echo "== /app/static =="
-          docker run --rm llm-gateway:test ls -laR /app/static/ || echo "::error::Missing /app/static"
+          docker run --rm llm-gateway:test ls -laR /app/static/
           echo "== /app/templates =="
-          docker run --rm llm-gateway:test ls -la /app/templates/ || echo "::error::Missing /app/templates"
+          docker run --rm llm-gateway:test ls -la /app/templates/
           echo "== Python import =="
           docker run --rm -e GATEWAY_DB=/tmp/test.db llm-gateway:test python3 -c "
           import sys, traceback
@@ -159,3 +157,11 @@ jobs:
               traceback.print_exc()
               sys.exit(1)
           "
+
+      - name: Upload docker diagnostic
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-docker-diag
+          retention-days: 1
+          path: /tmp/docker-verify.log
