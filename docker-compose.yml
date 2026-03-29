@@ -1,0 +1,19 @@
+services:
+  llm-gateway:
+    build: .
+    container_name: llm-gateway
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    volumes:
+      - llm-gateway-data:/data
+      - ./config.yaml:/app/config.yaml:ro
+    env_file:
+      - .env
+    environment:
+      - GATEWAY_DB=/data/gateway.db
+      - GATEWAY_ADMIN_KEY=${GATEWAY_ADMIN_KEY:-sk-admin-change-me}
+      - TZ=America/New_York
+
+volumes:
+  llm-gateway-data:

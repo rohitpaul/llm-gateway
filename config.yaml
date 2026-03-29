@@ -1,0 +1,18 @@
+# LLM Gateway Configuration
+# API keys go in .env — this file is for routing and provider settings
+
+# Model routing: override which provider handles a model
+# If not listed, provider is auto-detected from model name
+models: {}
+  # gpt-4o:
+  #   provider: openai
+  # claude-sonnet-4-5-20250514:
+  #   provider: anthropic
+
+# Provider overrides (optional)
+providers: {}
+  # openai:
+  #   base_url: https://api.openai.com/v1
+  #   # api_key: can set here but prefer .env
+  # anthropic:
+  #   base_url: https://api.anthropic.com

@@ -1,0 +1,541 @@
+"""SQLite database layer for the LLM gateway proxy.
+
+Provides async access to three tables:
+  - virtual_keys: API key management with usage tracking and filters.
+  - requests:    Per-request usage logging with full metadata.
+  - daily_usage: Pre-aggregated daily stats per key/model/provider.
+
+Uses aiosqlite for non-blocking I/O and sqlite3.Row for dict-like results.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Optional
+
+import aiosqlite
+
+from app import config
+
+# ---------------------------------------------------------------------------
+# SQL: table creation
+# ---------------------------------------------------------------------------
+
+_CREATE_VIRTUAL_KEYS = """
+CREATE TABLE IF NOT EXISTS virtual_keys (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT    NOT NULL,
+    key_hash        TEXT    NOT NULL UNIQUE,
+    key_prefix      TEXT    NOT NULL,
+    provider_filter TEXT,
+    model_filter    TEXT,
+    is_active       INTEGER NOT NULL DEFAULT 1,
+    created_at      TEXT    NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+    last_used_at    TEXT,
+    request_count   INTEGER NOT NULL DEFAULT 0,
+    token_limit     INTEGER,
+    tokens_used     INTEGER NOT NULL DEFAULT 0
+);
+"""
+
+_CREATE_REQUESTS = """
+CREATE TABLE IF NOT EXISTS requests (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    virtual_key_id    INTEGER,
+    request_id        TEXT    NOT NULL,
+    model             TEXT    NOT NULL,
+    provider          TEXT    NOT NULL,
+    input_tokens      INTEGER NOT NULL DEFAULT 0,
+    output_tokens     INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+    cost              REAL    NOT NULL DEFAULT 0.0,
+    latency_ms        REAL    NOT NULL DEFAULT 0.0,
+    status            TEXT    NOT NULL DEFAULT 'success',
+    error_message     TEXT,
+    source_ip         TEXT,
+    request_body      TEXT,
+    response_body     TEXT,
+    created_at        TEXT    NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+    FOREIGN KEY (virtual_key_id) REFERENCES virtual_keys(id)
+);
+"""
+
+_CREATE_DAILY_USAGE = """
+CREATE TABLE IF NOT EXISTS daily_usage (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    date            TEXT    NOT NULL,
+    virtual_key_id  INTEGER,
+    model           TEXT    NOT NULL,
+    provider        TEXT    NOT NULL,
+    request_count   INTEGER NOT NULL DEFAULT 0,
+    input_tokens    INTEGER NOT NULL DEFAULT 0,
+    output_tokens   INTEGER NOT NULL DEFAULT 0,
+    cost            REAL    NOT NULL DEFAULT 0.0,
+    UNIQUE(date, virtual_key_id, model, provider)
+);
+"""
+
+# Helpful indexes
+_CREATE_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_virtual_keys_key_hash ON virtual_keys(key_hash);",
+    "CREATE INDEX IF NOT EXISTS idx_requests_virtual_key_id ON requests(virtual_key_id);",
+    "CREATE INDEX IF NOT EXISTS idx_requests_created_at ON requests(created_at);",
+    "CREATE INDEX IF NOT EXISTS idx_requests_model ON requests(model);",
+    "CREATE INDEX IF NOT EXISTS idx_requests_provider ON requests(provider);",
+    "CREATE INDEX IF NOT EXISTS idx_daily_usage_date ON daily_usage(date);",
+    "CREATE INDEX IF NOT EXISTS idx_daily_usage_key ON daily_usage(virtual_key_id);",
+]
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    """Convert a sqlite3.Row to a plain dict, or return None."""
+    if row is None:
+        return None
+    return dict(row)
+
+
+def _rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
+    """Convert a list of sqlite3.Row objects to plain dicts."""
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Database class
+# ---------------------------------------------------------------------------
+
+class Database:
+    """Async SQLite database interface for the LLM gateway."""
+
+    def __init__(self, db_path: str | None = None) -> None:
+        self.db_path = db_path or config.DEFAULT_DB_PATH
+        self._db: aiosqlite.Connection | None = None
+
+    # -- lifecycle -----------------------------------------------------------
+
+    async def connect(self) -> None:
+        """Open the database connection and ensure tables exist."""
+        # Guarantee parent directory exists.
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+
+        self._db = await aiosqlite.connect(self.db_path)
+        self._db.row_factory = sqlite3.Row
+        await self._db.execute("PRAGMA journal_mode=WAL;")
+        await self._db.execute("PRAGMA foreign_keys=ON;")
+
+        # Create tables & indexes
+        await self._db.executescript(_CREATE_VIRTUAL_KEYS)
+        await self._db.executescript(_CREATE_REQUESTS)
+        await self._db.executescript(_CREATE_DAILY_USAGE)
+        for idx_sql in _CREATE_INDEXES:
+            await self._db.execute(idx_sql)
+        await self._db.commit()
+
+    async def close(self) -> None:
+        """Close the database connection."""
+        if self._db:
+            await self._db.close()
+            self._db = None
+
+    @property
+    def db(self) -> aiosqlite.Connection:
+        if self._db is None:
+            raise RuntimeError("Database is not connected. Call connect() first.")
+        return self._db
+
+    # -- virtual_keys --------------------------------------------------------
+
+    async def create_key(
+        self,
+        name: str,
+        key_hash: str,
+        key_prefix: str,
+        provider_filter: str | None = None,
+        model_filter: str | None = None,
+        token_limit: int | None = None,
+    ) -> int:
+        """Insert a new virtual API key. Returns the new row id."""
+        async with self.db.execute(
+            """
+            INSERT INTO virtual_keys
+                (name, key_hash, key_prefix, provider_filter, model_filter, token_limit)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (name, key_hash, key_prefix, provider_filter, model_filter, token_limit),
+        ) as cursor:
+            pass
+        await self.db.commit()
+        # Retrieve the id of the inserted row via a follow-up query.
+        async with self.db.execute(
+            "SELECT id FROM virtual_keys WHERE key_hash = ?", (key_hash,)
+        ) as cur:
+            row = await cur.fetchone()
+            return row["id"] if row else -1
+
+    async def validate_key(self, key_hash: str) -> dict[str, Any] | None:
+        """Look up a key by its hash.
+
+        If found and active, updates last_used_at / request_count and returns
+        the key row as a dict.  Returns None otherwise.
+        """
+        async with self.db.execute(
+            "SELECT * FROM virtual_keys WHERE key_hash = ? AND is_active = 1",
+            (key_hash,),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            return None
+
+        now = datetime.now(timezone.utc).isoformat()
+        await self.db.execute(
+            """
+            UPDATE virtual_keys
+            SET last_used_at = ?, request_count = request_count + 1
+            WHERE id = ?
+            """,
+            (now, row["id"]),
+        )
+        await self.db.commit()
+
+        # Re-fetch so the returned dict reflects the update.
+        async with self.db.execute(
+            "SELECT * FROM virtual_keys WHERE id = ?", (row["id"],)
+        ) as cur:
+            updated = await cur.fetchone()
+        return _row_to_dict(updated)
+
+    async def list_keys(self) -> list[dict[str, Any]]:
+        """Return all virtual keys ordered by creation date."""
+        async with self.db.execute(
+            "SELECT * FROM virtual_keys ORDER BY created_at DESC"
+        ) as cur:
+            rows = await cur.fetchall()
+        return _rows_to_dicts(rows)
+
+    async def deactivate_key(self, key_id: int) -> bool:
+        """Set is_active=0 for the given key. Returns True if a row was updated."""
+        cursor = await self.db.execute(
+            "UPDATE virtual_keys SET is_active = 0 WHERE id = ?", (key_id,)
+        )
+        await self.db.commit()
+        return cursor.rowcount > 0
+
+    async def delete_key(self, key_id: int) -> bool:
+        """Delete a virtual key row. Returns True if a row was removed."""
+        cursor = await self.db.execute(
+            "DELETE FROM virtual_keys WHERE id = ?", (key_id,)
+        )
+        await self.db.commit()
+        return cursor.rowcount > 0
+
+    # -- requests ------------------------------------------------------------
+
+    async def log_request(
+        self,
+        virtual_key_id: int | None,
+        request_id: str,
+        model: str,
+        provider: str,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cache_read: int = 0,
+        cache_write: int = 0,
+        cost: float = 0.0,
+        latency_ms: float = 0.0,
+        status: str = "success",
+        error_message: str | None = None,
+        source_ip: str | None = None,
+    ) -> int:
+        """Insert a request log row. Returns the new row id."""
+        async with self.db.execute(
+            """
+            INSERT INTO requests (
+                virtual_key_id, request_id, model, provider,
+                input_tokens, output_tokens,
+                cache_read_tokens, cache_write_tokens,
+                cost, latency_ms, status, error_message, source_ip
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                virtual_key_id, request_id, model, provider,
+                input_tokens, output_tokens,
+                cache_read, cache_write,
+                cost, latency_ms, status, error_message, source_ip,
+            ),
+        ) as cursor:
+            pass
+        await self.db.commit()
+
+        # Update tokens_used on the parent key.
+        if virtual_key_id is not None:
+            total = input_tokens + output_tokens
+            if total > 0:
+                await self.db.execute(
+                    "UPDATE virtual_keys SET tokens_used=tokens_used + ? WHERE id = ?",
+                    (total, virtual_key_id),
+                )
+                await self.db.commit()
+
+        # Upsert daily_usage.
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        await self.db.execute(
+            """
+            INSERT INTO daily_usage
+                (date, virtual_key_id, model, provider, request_count,
+                 input_tokens, output_tokens, cost)
+            VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+            ON CONFLICT(date, virtual_key_id, model, provider) DO UPDATE SET
+                request_count = request_count + 1,
+                input_tokens   = input_tokens   + excluded.input_tokens,
+                output_tokens  = output_tokens  + excluded.output_tokens,
+                cost           = cost           + excluded.cost
+            """,
+            (today, virtual_key_id, model, provider, input_tokens, output_tokens, cost),
+        )
+        await self.db.commit()
+
+        # Retrieve inserted id.
+        async with self.db.execute(
+            "SELECT id FROM requests WHERE request_id = ?", (request_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            return row["id"] if row else -1
+
+    async def get_requests(
+        self,
+        key_id: int | None = None,
+        model: str | None = None,
+        provider: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Return a page of request logs plus total matching count.
+
+        date_from / date_to are inclusive ISO date strings (YYYY-MM-DD or full
+        ISO timestamp).  Response bodies are excluded from listing queries for
+        performance.
+        """
+        conditions: list[str] = []
+        params: list[Any] = []
+
+        if key_id is not None:
+            conditions.append("virtual_key_id = ?")
+            params.append(key_id)
+        if model is not None:
+            conditions.append("model = ?")
+            params.append(model)
+        if provider is not None:
+            conditions.append("provider = ?")
+            params.append(provider)
+        if date_from is not None:
+            conditions.append("created_at >= ?")
+            params.append(date_from)
+        if date_to is not None:
+            conditions.append("created_at <= ?")
+            params.append(date_to)
+
+        where = ""
+        if conditions:
+            where = "WHERE " + " AND ".join(conditions)
+
+        # Total count
+        count_sql = f"SELECT COUNT(*) AS cnt FROM requests {where}"
+        async with self.db.execute(count_sql, params) as cur:
+            row = await cur.fetchone()
+        total = row["cnt"] if row else 0
+
+        # Page of results (omit large body columns)
+        data_sql = (
+            f"SELECT id, virtual_key_id, request_id, model, provider, "
+            f"input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, "
+            f"cost, latency_ms, status, error_message, source_ip, created_at "
+            f"FROM requests {where} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        )
+        async with self.db.execute(data_sql, params + [limit, offset]) as cur:
+            rows = await cur.fetchall()
+
+        return _rows_to_dicts(rows), total
+
+    # -- daily / aggregated stats -------------------------------------------
+
+    async def get_daily_stats(
+        self,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        key_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return daily_usage rows, optionally filtered by date range and key."""
+        conditions: list[str] = []
+        params: list[Any] = []
+
+        if date_from is not None:
+            conditions.append("date >= ?")
+            params.append(date_from)
+        if date_to is not None:
+            conditions.append("date <= ?")
+            params.append(date_to)
+        if key_id is not None:
+            conditions.append("virtual_key_id = ?")
+            params.append(key_id)
+
+        where = ""
+        if conditions:
+            where = "WHERE " + " AND ".join(conditions)
+
+        sql = f"SELECT * FROM daily_usage {where} ORDER BY date DESC"
+        async with self.db.execute(sql, params) as cur:
+            rows = await cur.fetchall()
+        return _rows_to_dicts(rows)
+
+    async def get_model_stats(
+        self,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Aggregate daily_usage by model."""
+        conditions: list[str] = []
+        params: list[Any] = []
+
+        if date_from is not None:
+            conditions.append("date >= ?")
+            params.append(date_from)
+        if date_to is not None:
+            conditions.append("date <= ?")
+            params.append(date_to)
+
+        where = ""
+        if conditions:
+            where = "WHERE " + " AND ".join(conditions)
+
+        sql = f"""
+            SELECT model,
+                   SUM(request_count)  AS request_count,
+                   SUM(input_tokens)   AS input_tokens,
+                   SUM(output_tokens)  AS output_tokens,
+                   SUM(cost)           AS cost
+            FROM daily_usage
+            {where}
+            GROUP BY model
+            ORDER BY cost DESC
+        """
+        async with self.db.execute(sql, params) as cur:
+            rows = await cur.fetchall()
+        return _rows_to_dicts(rows)
+
+    async def get_provider_stats(
+        self,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Aggregate daily_usage by provider."""
+        conditions: list[str] = []
+        params: list[Any] = []
+
+        if date_from is not None:
+            conditions.append("date >= ?")
+            params.append(date_from)
+        if date_to is not None:
+            conditions.append("date <= ?")
+            params.append(date_to)
+
+        where = ""
+        if conditions:
+            where = "WHERE " + " AND ".join(conditions)
+
+        sql = f"""
+            SELECT provider,
+                   SUM(request_count)  AS request_count,
+                   SUM(input_tokens)   AS input_tokens,
+                   SUM(output_tokens)  AS output_tokens,
+                   SUM(cost)           AS cost
+            FROM daily_usage
+            {where}
+            GROUP BY provider
+            ORDER BY cost DESC
+        """
+        async with self.db.execute(sql, params) as cur:
+            rows = await cur.fetchall()
+        return _rows_to_dicts(rows)
+
+    async def get_summary(
+        self,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> dict[str, Any]:
+        """Return high-level totals: request count, tokens, cost, unique models."""
+        conditions: list[str] = []
+        params: list[Any] = []
+
+        if date_from is not None:
+            conditions.append("date >= ?")
+            params.append(date_from)
+        if date_to is not None:
+            conditions.append("date <= ?")
+            params.append(date_to)
+
+        where = ""
+        if conditions:
+            where = "WHERE " + " AND ".join(conditions)
+
+        sql = f"""
+            SELECT COALESCE(SUM(request_count), 0)  AS total_requests,
+                   COALESCE(SUM(input_tokens),  0)   AS total_input_tokens,
+                   COALESCE(SUM(output_tokens), 0)   AS total_output_tokens,
+                   COALESCE(SUM(cost), 0.0)           AS total_cost,
+                   COUNT(DISTINCT model)              AS unique_models
+            FROM daily_usage
+            {where}
+        """
+        async with self.db.execute(sql, params) as cur:
+            row = await cur.fetchone()
+        return _row_to_dict(row)  # type: ignore[return-value]
+
+    # -- token limits --------------------------------------------------------
+
+    async def check_token_limit(self, key_id: int) -> bool:
+        """Return True if the key is under its token_limit.
+
+        Keys with token_limit=None are always considered under limit.
+        Keys without a matching row also return True.
+        """
+        async with self.db.execute(
+            "SELECT token_limit, tokens_used FROM virtual_keys WHERE id = ?",
+            (key_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            return True
+        limit: int | None = row["token_limit"]
+        if limit is None:
+            return True
+        return row["tokens_used"] < limit
+
+    # -- maintenance ---------------------------------------------------------
+
+    async def prune_bodies(self, older_than_days: int = 30) -> int:
+        """Set request_body and response_body to NULL for rows older than N days.
+
+        Returns the number of rows affected.
+        """
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=older_than_days)
+        ).isoformat()
+        cursor = await self.db.execute(
+            """
+            UPDATE requests
+            SET request_body = NULL, response_body = NULL
+            WHERE created_at < ?
+              AND (request_body IS NOT NULL OR response_body IS NOT NULL)
+            """,
+            (cutoff,),
+        )
+        await self.db.commit()
+        return cursor.rowcount
