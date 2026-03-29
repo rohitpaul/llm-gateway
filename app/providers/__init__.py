@@ -177,6 +177,13 @@ async def proxy_chat_completions(
             return {"error": error_text, "status_code": resp.status_code}, meta
 
         resp_json = resp.json()
+
+        # Translate provider-specific responses back to OpenAI format
+        if provider == "anthropic":
+            resp_json = _anthropic_to_openai(resp_json, model)
+        elif provider == "gemini":
+            resp_json = _gemini_to_openai(resp_json, model)
+
         usage = resp_json.get("usage", {})
         input_tokens = usage.get("prompt_tokens", 0)
         output_tokens = usage.get("completion_tokens", 0)
@@ -363,3 +370,95 @@ def _openai_to_gemini(body: dict) -> dict:
         gemini_body.setdefault("generationConfig", {})["maxOutputTokens"] = body["max_tokens"]
 
     return gemini_body
+
+
+def _anthropic_to_openai(resp: dict, model: str) -> dict:
+    """Convert an Anthropic messages response to OpenAI chat completion format."""
+    # Extract text from content blocks
+    content_blocks = resp.get("content", [])
+    text_parts = []
+    for block in content_blocks:
+        if isinstance(block, dict) and block.get("type") == "text":
+            text_parts.append(block.get("text", ""))
+        elif isinstance(block, str):
+            text_parts.append(block)
+    content = "\n".join(text_parts) if text_parts else ""
+
+    # Map stop reasons
+    stop_reason = resp.get("stop_reason")
+    finish_map = {
+        "end_turn": "stop",
+        "max_tokens": "length",
+        "stop_sequence": "stop",
+        "tool_use": "tool_calls",
+    }
+    finish_reason = finish_map.get(stop_reason, "stop")
+
+    # Usage
+    a_usage = resp.get("usage", {})
+    input_tokens = a_usage.get("input_tokens", 0)
+    output_tokens = a_usage.get("output_tokens", 0)
+    cache_read = a_usage.get("cache_read_input_tokens", 0)
+    cache_write = a_usage.get("cache_creation_input_tokens", 0)
+
+    return {
+        "id": resp.get("id", f"chatcmpl-{uuid.uuid4().hex[:24]}"),
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": resp.get("model", model),
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": content},
+                "finish_reason": finish_reason,
+            }
+        ],
+        "usage": {
+            "prompt_tokens": input_tokens,
+            "completion_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+            "prompt_tokens_details": {"cached_tokens": cache_read},
+        },
+    }
+
+
+def _gemini_to_openai(resp: dict, model: str) -> dict:
+    """Convert a Gemini generateContent response to OpenAI chat completion format."""
+    candidates = resp.get("candidates", [])
+    content = ""
+    finish_reason = "stop"
+    if candidates:
+        candidate = candidates[0]
+        parts = candidate.get("content", {}).get("parts", [])
+        text_parts = [p.get("text", "") for p in parts if "text" in p]
+        content = "\n".join(text_parts)
+        reason = candidate.get("finishReason", "")
+        if reason == "MAX_TOKENS":
+            finish_reason = "length"
+        elif reason == "SAFETY":
+            finish_reason = "content_filter"
+
+    usage_meta = resp.get("usageMetadata", {})
+    input_tokens = usage_meta.get("promptTokenCount", 0)
+    output_tokens = usage_meta.get("candidatesTokenCount", 0)
+    cached = usage_meta.get("cachedContentTokenCount", 0)
+
+    return {
+        "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": content},
+                "finish_reason": finish_reason,
+            }
+        ],
+        "usage": {
+            "prompt_tokens": input_tokens,
+            "completion_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+            "prompt_tokens_details": {"cached_tokens": cached},
+        },
+    }
