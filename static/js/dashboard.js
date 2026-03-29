@@ -245,8 +245,8 @@ function gateway() {
                         labels: { style: { colors: '#9ca3af', fontSize: '10px' } },
                     },
                     yaxis: [
-                        { title: { text: 'Requests', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { colors: '#9ca3af', fontSize: '10px' } } },
-                        { opposite: true, title: { text: 'Tokens (K)', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { colors: '#9ca3af', fontSize: '10px' } } },
+                        { title: { text: 'Requests', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' } } },
+                        { opposite: true, title: { text: 'Tokens (K)', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' } } },
                     ],
                     grid: { borderColor: 'rgba(255,255,255,0.06)', strokeDashArray: 3 },
                     legend: { labels: { colors: '#d1d5db' }, fontSize: '11px' },
@@ -298,8 +298,8 @@ function gateway() {
                         labels: { style: { colors: '#9ca3af', fontSize: '10px' } },
                     },
                     yaxis: [
-                        { title: { text: 'Tokens (K)', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { colors: '#9ca3af', fontSize: '10px' } } },
-                        { opposite: true, title: { text: 'Cost ($)', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { colors: '#9ca3af', fontSize: '10px' }, formatter: v => '$' + (v || 0).toFixed(4) } },
+                        { title: { text: 'Tokens (K)', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' } } },
+                        { opposite: true, title: { text: 'Cost ($)', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' }, formatter: v => '$' + (v || 0).toFixed(4) } },
                     ],
                     grid: { borderColor: 'rgba(255,255,255,0.06)', strokeDashArray: 3 },
                     legend: { labels: { colors: '#d1d5db' }, fontSize: '11px' },
