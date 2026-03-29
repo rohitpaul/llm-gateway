@@ -221,6 +221,29 @@
                 </div>
             </div>
         </div>
+
+        <!-- Provider health -->
+        <div class="bg-gray-900 rounded-lg p-4 border border-gray-800">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-sm font-medium text-gray-300">Provider Health</h3>
+                <button @click="checkProviderHealth()" class="text-xs text-blue-400 hover:text-blue-300" x-text="providerHealthLoading ? 'Checking...' : 'Check now'"></button>
+            </div>
+            <div class="space-y-1.5">
+                <template x-for="[name, info] in Object.entries(providerHealth)" :key="name">
+                    <div class="flex items-center justify-between text-sm">
+                        <span class="text-gray-300 capitalize" x-text="name"></span>
+                        <div class="flex items-center gap-2">
+                            <span x-show="info.latency_ms" class="text-gray-500 font-mono text-xs" x-text="(info.latency_ms || 0).toFixed(0) + 'ms'"></span>
+                            <span x-show="info.status==='reachable'" class="text-green-400 text-xs">✓ up</span>
+                            <span x-show="info.status==='error'" class="text-yellow-400 text-xs" :title="info.error">⚠ error</span>
+                            <span x-show="info.status==='unreachable'" class="text-red-400 text-xs" :title="info.error">✗ down</span>
+                            <span x-show="info.status==='no_url'" class="text-gray-600 text-xs">not configured</span>
+                        </div>
+                    </div>
+                </template>
+                <div x-show="Object.keys(providerHealth).length === 0" class="text-gray-500 text-sm text-center py-3">No providers configured</div>
+            </div>
+        </div>
     </div>
 
     <!-- Requests Tab -->
@@ -455,6 +478,10 @@ function gateway() {
         requestDetail: null,
         detailBodyTab: 'request',
 
+        // Provider health
+        providerHealth: {},
+        providerHealthLoading: false,
+
         // Chart state
         chartDays: 7,
         chartInstances: {},
@@ -573,6 +600,9 @@ function gateway() {
                 this.loadKeys(),
             ];
             promises.push(this.loadDailyStats());
+            if (Object.keys(this.providerHealth).length === 0) {
+                promises.push(this.checkProviderHealth());
+            }
             await Promise.all(promises);
         },
 
@@ -595,6 +625,15 @@ function gateway() {
                 const r = await this.apiFetch('/api/stats/providers');
                 if (r.ok) this.providerStats = (await r.json()).providers || [];
             } catch {}
+        },
+
+        async checkProviderHealth() {
+            this.providerHealthLoading = true;
+            try {
+                const r = await this.apiFetch('/api/health/providers');
+                if (r.ok) this.providerHealth = (await r.json()).providers || {};
+            } catch {}
+            this.providerHealthLoading = false;
         },
 
         async loadDailyStats() {

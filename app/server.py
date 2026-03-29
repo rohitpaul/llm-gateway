@@ -19,7 +19,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from app import config
 from app.database import Database
-from app.providers import proxy_chat_completions, resolve_provider, calculate_cost, PRICING, _infer_provider
+from app.providers import proxy_chat_completions, resolve_provider, calculate_cost, PRICING, _infer_provider, _get_api_key
 
 # Max body size to store in the DB (bytes) — larger bodies are truncated
 _MAX_BODY_SIZE = 100_000  # 100 KB
@@ -274,6 +274,86 @@ async def list_models():
 @app.get("/health")
 async def health():
     return {"status": "ok", "version": "0.1.0"}
+
+
+@app.get("/api/health/providers")
+async def health_providers():
+    """Check connectivity to all configured upstream providers.
+
+    Returns per-provider status: reachable/unreachable/error with latency.
+    Uses lightweight endpoints (GET /models or equivalent) to verify
+    connectivity without consuming tokens.
+    """
+    results = {}
+    provider_cfg = app_config.get("providers", {})
+    model_routes = app_config.get("models", {})
+
+    # Discover all active providers from config routes + env keys
+    active_providers: set[str] = set()
+    for _model, route in model_routes.items():
+        if isinstance(route, dict):
+            active_providers.add(route.get("provider", ""))
+        elif isinstance(route, str):
+            active_providers.add(route)
+    for prov_name in config.PROVIDER_BASE_URLS:
+        if config.get_provider_api_key(prov_name):
+            active_providers.add(prov_name)
+    for prov_name in provider_cfg:
+        active_providers.add(prov_name)
+    active_providers.discard("")
+
+    for provider in sorted(active_providers):
+        base_url = provider_cfg.get(provider, {})
+        if isinstance(base_url, dict):
+            base_url = base_url.get("base_url", "")
+        if not base_url:
+            base_url = config.PROVIDER_BASE_URLS.get(provider, "")
+
+        if not base_url:
+            results[provider] = {"status": "no_url", "error": "No base URL configured"}
+            continue
+
+        api_key = _get_api_key(provider, app_config)
+
+        # Build a lightweight health-check URL
+        if provider == "anthropic":
+            check_url = f"{base_url}/v1/models"
+            headers = {"x-api-key": api_key or "", "anthropic-version": "2023-06-01"}
+        else:
+            # OpenAI-compatible: /models is the standard lightweight endpoint
+            check_url = f"{base_url}/models"
+            headers = {"Content-Type": "application/json"}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+
+        import time as _time
+        start = _time.monotonic()
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(check_url, headers=headers)
+                latency_ms = (_time.monotonic() - start) * 1000
+                if resp.status_code < 500:
+                    results[provider] = {
+                        "status": "reachable",
+                        "status_code": resp.status_code,
+                        "latency_ms": round(latency_ms, 1),
+                    }
+                else:
+                    results[provider] = {
+                        "status": "error",
+                        "status_code": resp.status_code,
+                        "latency_ms": round(latency_ms, 1),
+                        "error": resp.text[:200],
+                    }
+        except Exception as e:
+            latency_ms = (_time.monotonic() - start) * 1000
+            results[provider] = {
+                "status": "unreachable",
+                "latency_ms": round(latency_ms, 1),
+                "error": str(e)[:200],
+            }
+
+    return {"providers": results}
 
 @app.post("/api/auth/verify")
 async def auth_verify(request: Request):
