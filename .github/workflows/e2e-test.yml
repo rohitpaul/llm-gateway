@@ -61,24 +61,19 @@ jobs:
           sleep 5
           STATE=$(docker inspect llm-gateway-test --format='{{.State.Status}}' 2>/dev/null || echo "unknown")
           EXIT=$(docker inspect llm-gateway-test --format='{{.State.ExitCode}}' 2>/dev/null || echo "n/a")
-          LOGS=$(docker logs llm-gateway-test 2>&1 || true)
-          echo "::error::Container state=$STATE exit=$EXIT logs=$LOGS"
-          echo "::group::Full container logs"
+          LOGS=$(docker logs llm-gateway-test 2>&1 | head -50 || true)
+          echo "::error::Container state=$STATE exit=$EXIT"
           echo "$LOGS"
-          echo "::endgroup::"
-          echo "::group::Files in /app"
-          docker exec llm-gateway-test ls -la /app/ 2>&1 || true
-          echo "::endgroup::"
-          echo "::group::Config file"
-          docker exec llm-gateway-test cat /app/config.yaml 2>&1 || true
-          echo "::endgroup::"
-          echo "::group::Internal health check"
-          docker exec llm-gateway-test sh -c "wget -qO- http://localhost:4000/health 2>&1 || echo 'wget failed'" || true
-          echo "::endgroup::"
-          # Also dump Python traceback if any
-          echo "::group::Python process check"
-          docker exec llm-gateway-test sh -c "ps aux || true" || true
-          echo "::endgroup::"
+          # If container exited, run the app manually to get the full traceback
+          if [ "$STATE" = "exited" ]; then
+            echo "== Container exited, running app directly for traceback =="
+            docker run --rm \
+              -v /tmp/test-config.yaml:/app/config.yaml:ro \
+              -e GATEWAY_ADMIN_KEY=${{ env.GATEWAY_ADMIN_KEY }} \
+              -e GATEWAY_DB=/data/gateway.db \
+              llm-gateway:test \
+              python3 -c "import app.server; print('OK')" 2>&1 || true
+          fi
 
       - name: Wait for gateway to be healthy
         run: |
