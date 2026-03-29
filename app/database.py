@@ -262,6 +262,8 @@ class Database:
         status: str = "success",
         error_message: str | None = None,
         source_ip: str | None = None,
+        request_body: str | None = None,
+        response_body: str | None = None,
     ) -> int:
         """Insert a request log row. Returns the new row id."""
         async with self.db.execute(
@@ -270,17 +272,19 @@ class Database:
                 virtual_key_id, request_id, model, provider,
                 input_tokens, output_tokens,
                 cache_read_tokens, cache_write_tokens,
-                cost, latency_ms, status, error_message, source_ip
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                cost, latency_ms, status, error_message, source_ip,
+                request_body, response_body
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 virtual_key_id, request_id, model, provider,
                 input_tokens, output_tokens,
                 cache_read, cache_write,
                 cost, latency_ms, status, error_message, source_ip,
+                request_body, response_body,
             ),
         ) as cursor:
-            pass
+            inserted_id = cursor.lastrowid
         await self.db.commit()
 
         # Update tokens_used on the parent key.
@@ -288,7 +292,7 @@ class Database:
             total = input_tokens + output_tokens
             if total > 0:
                 await self.db.execute(
-                    "UPDATE virtual_keys SET tokens_used=tokens_used + ? WHERE id = ?",
+                    "UPDATE virtual_keys SET tokens_used = tokens_used + ? WHERE id = ?",
                     (total, virtual_key_id),
                 )
                 await self.db.commit()
@@ -303,20 +307,15 @@ class Database:
             VALUES (?, ?, ?, ?, 1, ?, ?, ?)
             ON CONFLICT(date, virtual_key_id, model, provider) DO UPDATE SET
                 request_count = request_count + 1,
-                input_tokens   = input_tokens   + excluded.input_tokens,
-                output_tokens  = output_tokens  + excluded.output_tokens,
+                input_tokens  = input_tokens  + excluded.input_tokens,
+                output_tokens = output_tokens + excluded.output_tokens,
                 cost           = cost           + excluded.cost
             """,
             (today, virtual_key_id, model, provider, input_tokens, output_tokens, cost),
         )
         await self.db.commit()
 
-        # Retrieve inserted id.
-        async with self.db.execute(
-            "SELECT id FROM requests WHERE request_id = ?", (request_id,)
-        ) as cur:
-            row = await cur.fetchone()
-            return row["id"] if row else -1
+        return inserted_id if inserted_id else -1
 
     async def get_requests(
         self,
@@ -374,6 +373,14 @@ class Database:
             rows = await cur.fetchall()
 
         return _rows_to_dicts(rows), total
+
+    async def get_request(self, request_id: int) -> dict[str, Any] | None:
+        """Return a single request row by its integer id, including bodies."""
+        async with self.db.execute(
+            "SELECT * FROM requests WHERE id = ?", (request_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        return _row_to_dict(row)
 
     # -- daily / aggregated stats -------------------------------------------
 

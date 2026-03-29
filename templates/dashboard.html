@@ -241,7 +241,7 @@
                 </thead>
                 <tbody class="divide-y divide-gray-800">
                     <template x-for="r in requests" :key="r.id">
-                        <tr class="hover:bg-gray-800/30">
+                        <tr class="hover:bg-gray-800/30 cursor-pointer" @click="showRequestDetail(r.id)">
                             <td class="mobile-card-header px-4 py-2.5 text-gray-400 whitespace-nowrap" x-text="formatTime(r.created_at)" data-label=""></td>
                             <td class="px-4 py-1 font-mono text-xs" x-text="r.model" data-label="Model"></td>
                             <td class="px-4 py-2.5 capitalize text-gray-400 hide-mobile" x-text="r.provider" data-label="Provider"></td>
@@ -386,6 +386,55 @@
 
 </main>
 
+<!-- Request Detail Modal -->
+<div x-show="requestDetail" x-cloak x-transition.opacity class="fixed inset-0 z-50 flex items-start justify-center pt-10 sm:pt-20 px-3" @click.self="requestDetail=null">
+    <div class="fixed inset-0 bg-black/60" @click="requestDetail=null"></div>
+    <div class="relative bg-gray-900 border border-gray-700 rounded-xl w-full max-w-3xl max-h-[80vh] flex flex-col shadow-2xl" @click.stop>
+        <!-- Header -->
+        <div class="flex items-center justify-between px-4 py-3 border-b border-gray-800 shrink-0">
+            <div class="flex items-center gap-3">
+                <h3 class="text-sm font-semibold" x-text="requestDetail?.model || ''"></h3>
+                <span class="text-xs px-1.5 py-0.5 rounded" :class="requestDetail?.status === 'success' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'" x-text="requestDetail?.status"></span>
+            </div>
+            <button @click="requestDetail=null" class="text-gray-400 hover:text-gray-200 text-lg leading-none">&times;</button>
+        </div>
+        <!-- Meta -->
+        <div class="flex flex-wrap gap-x-4 gap-y-1 px-4 py-2 text-xs text-gray-400 border-b border-gray-800 shrink-0">
+            <span>Provider: <span class="text-gray-200 capitalize" x-text="requestDetail?.provider"></span></span>
+            <span>In: <span class="text-gray-200 font-mono" x-text="formatTokens(requestDetail?.input_tokens || 0)"></span></span>
+            <span>Out: <span class="text-gray-200 font-mono" x-text="formatTokens(requestDetail?.output_tokens || 0)"></span></span>
+            <span>Cost: <span class="text-green-400 font-mono" x-text="'$' + (requestDetail?.cost || 0).toFixed(4)"></span></span>
+            <span>Latency: <span class="text-gray-200 font-mono" x-text="(requestDetail?.latency_ms || 0).toFixed(0) + 'ms'"></span></span>
+            <span x-show="requestDetail?.error_message" class="text-red-400">Error: <span x-text="requestDetail?.error_message"></span></span>
+        </div>
+        <!-- Body tabs -->
+        <div class="px-4 pt-2 flex gap-3 text-xs shrink-0">
+            <button @click="detailBodyTab='request'" :class="detailBodyTab==='request' ? 'text-blue-400 border-b border-blue-400 pb-1' : 'text-gray-400 pb-1'">Request</button>
+            <button @click="detailBodyTab='response'" :class="detailBodyTab==='response' ? 'text-blue-400 border-b border-blue-400 pb-1' : 'text-gray-400 pb-1'">Response</button>
+        </div>
+        <!-- Body content -->
+        <div class="overflow-auto flex-1 px-4 py-3">
+            <template x-if="detailBodyTab==='request'">
+                <div>
+                    <div x-show="!requestDetail?.request_body" class="text-gray-500 text-xs italic">No request body logged</div>
+                    <pre x-show="requestDetail?.request_body" class="text-xs font-mono text-gray-300 whitespace-pre-wrap break-words bg-gray-950 rounded-lg p-3 border border-gray-800" x-text="formatJson(requestDetail?.request_body)"></pre>
+                </div>
+            </template>
+            <template x-if="detailBodyTab==='response'">
+                <div>
+                    <div x-show="!requestDetail?.response_body" class="text-gray-500 text-xs italic">No response body logged (streaming responses are not captured)</div>
+                    <pre x-show="requestDetail?.response_body" class="text-xs font-mono text-gray-300 whitespace-pre-wrap break-words bg-gray-950 rounded-lg p-3 border border-gray-800" x-text="formatJson(requestDetail?.response_body)"></pre>
+                </div>
+            </template>
+        </div>
+        <!-- Footer -->
+        <div class="flex items-center justify-between px-4 py-2 border-t border-gray-800 text-xs text-gray-500 shrink-0">
+            <span x-text="requestDetail?.created_at ? formatTime(requestDetail.created_at) : ''"></span>
+            <span x-text="requestDetail?.source_ip || ''"></span>
+        </div>
+    </div>
+</div>
+
 <script>
 function gateway() {
     return {
@@ -400,6 +449,10 @@ function gateway() {
         keys: [],
         newKey: { name: '', provider_filter: '', model_filter: '', token_limit: '' },
         createdKey: null,
+
+        // Request detail modal
+        requestDetail: null,
+        detailBodyTab: 'request',
 
         // Chart state
         chartDays: 7,
@@ -758,6 +811,26 @@ function gateway() {
                 await this.apiFetch(`/admin/keys/${id}`, { method: 'DELETE' });
                 await this.loadKeys();
             } catch {}
+        },
+
+        async showRequestDetail(id) {
+            this.detailBodyTab = 'request';
+            this.requestDetail = null;
+            try {
+                const r = await this.apiFetch('/api/requests/' + id);
+                if (r.ok) {
+                    this.requestDetail = await r.json();
+                }
+            } catch {}
+        },
+
+        formatJson(text) {
+            if (!text) return '';
+            try {
+                return JSON.stringify(JSON.parse(text), null, 2);
+            } catch {
+                return text;
+            }
         },
 
         formatTokens(n) {

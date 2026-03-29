@@ -21,6 +21,9 @@ from app import config
 from app.database import Database
 from app.providers import proxy_chat_completions, resolve_provider, calculate_cost, PRICING, _infer_provider
 
+# Max body size to store in the DB (bytes) — larger bodies are truncated
+_MAX_BODY_SIZE = 100_000  # 100 KB
+
 # ---------------------------------------------------------------------------
 # Globals
 # ---------------------------------------------------------------------------
@@ -40,6 +43,23 @@ def _int_param(request: Request, name: str, default: int | None = None) -> int |
         return int(val)
     except ValueError:
         return default
+
+
+def _serialize_body(body: Any, max_bytes: int = _MAX_BODY_SIZE) -> str | None:
+    """Serialize a request/response body to JSON string for DB storage.
+
+    Returns None if the body is empty. Truncates if serialized form
+    exceeds max_bytes.
+    """
+    if body is None:
+        return None
+    try:
+        text = json.dumps(body, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        text = str(body)
+    if len(text) > max_bytes:
+        text = text[:max_bytes] + "\n... [truncated]"
+    return text
 
 # ---------------------------------------------------------------------------
 # Key helpers
@@ -167,6 +187,7 @@ async def chat_completions(request: Request):
             status="error",
             error_message=str(e)[:500],
             source_ip=request.client.host if request.client else None,
+            request_body=_serialize_body(body),
         )
         raise HTTPException(status_code=502, detail=f"Upstream error: {str(e)[:200]}")
 
@@ -195,6 +216,7 @@ async def chat_completions(request: Request):
                     status=meta.get("status", "success"),
                     error_message=meta.get("error_message"),
                     source_ip=request.client.host if request.client else None,
+                    request_body=_serialize_body(body),
                 )
             except Exception as e:
                 print(f"Stream logging error: {e}")
@@ -221,6 +243,8 @@ async def chat_completions(request: Request):
         status=meta.get("status", "success"),
         error_message=meta.get("error_message"),
         source_ip=request.client.host if request.client else None,
+        request_body=_serialize_body(body),
+        response_body=_serialize_body(response),
     )
 
     return JSONResponse(content=response)
@@ -368,6 +392,15 @@ async def list_requests(request: Request, admin: dict = Depends(verify_admin)):
     offset = _int_param(request, "offset", 0)
     reqs, total = await db.get_requests(key_id, model, provider, date_from, date_to, limit, offset)
     return {"requests": reqs, "total": total, "limit": limit, "offset": offset}
+
+
+@app.get("/api/requests/{request_id}")
+async def get_request(request_id: int, admin: dict = Depends(verify_admin)):
+    """Return a single request with full request/response bodies."""
+    row = await db.get_request(request_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Request not found")
+    return row
 
 
 # ---------------------------------------------------------------------------
