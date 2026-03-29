@@ -502,7 +502,7 @@ app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__
 
 @app.get("/")
 async def dashboard(request: Request):
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+    return templates.TemplateResponse(request, "dashboard.html")
 
 
 # ---------------------------------------------------------------------------
