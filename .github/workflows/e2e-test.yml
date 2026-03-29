@@ -40,10 +40,7 @@ jobs:
 
       - name: Create minimal config
         run: |
-          cat > /tmp/test-config.yaml << 'EOF'
-          models: {}
-          providers: {}
-          EOF
+          printf 'models: {}\nproviders: {}\n' > /tmp/test-config.yaml
 
       - name: Debug - show config contents
         run: cat /tmp/test-config.yaml
@@ -67,12 +64,10 @@ jobs:
           docker logs llm-gateway-test 2>&1 | tee -a /tmp/debug.log || true
           echo "=== Files in /app ===" | tee -a /tmp/debug.log
           docker exec llm-gateway-test ls -la /app/ 2>&1 | tee -a /tmp/debug.log || true
-          echo "=== Files in /app/static ===" | tee -a /tmp/debug.log
-          docker exec llm-gateway-test ls -la /app/static/ 2>&1 | tee -a /tmp/debug.log || true
-          echo "=== Config file contents ===" | tee -a /tmp/debug.log
+          echo "=== Config file ===" | tee -a /tmp/debug.log
           docker exec llm-gateway-test cat /app/config.yaml 2>&1 | tee -a /tmp/debug.log || true
-          echo "=== Curl health from inside container ===" | tee -a /tmp/debug.log
-          docker exec llm-gateway-test wget -qO- http://localhost:4000/health 2>&1 | tee -a /tmp/debug.log || true
+          echo "=== Internal health check ===" | tee -a /tmp/debug.log
+          docker exec llm-gateway-test sh -c "wget -qO- http://localhost:4000/health 2>&1 || echo 'wget failed'" | tee -a /tmp/debug.log || true
 
       - name: Upload debug logs
         if: always()
