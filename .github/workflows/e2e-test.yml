@@ -38,11 +38,19 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Create minimal config
+        run: |
+          cat > /tmp/test-config.yaml <<'EOF'
+          models: {}
+          providers: {}
+          EOF
+
       - name: Start LLM Gateway container
         run: |
           docker run -d \
             --name llm-gateway-test \
             -p 4000:4000 \
+            -v /tmp/test-config.yaml:/app/config.yaml:ro \
             -e GATEWAY_ADMIN_KEY=${{ env.GATEWAY_ADMIN_KEY }} \
             -e GATEWAY_DB=/data/gateway.db \
             llm-gateway:test
@@ -55,9 +63,17 @@ jobs:
               echo "✓ Gateway is up (attempt $i)"
               break
             fi
+            # Print early logs on first attempt for debugging
+            if [ "$i" -eq 1 ]; then
+              sleep 3
+              echo "--- Container logs so far ---"
+              docker logs llm-gateway-test 2>&1 || true
+              echo "--- End logs ---"
+            fi
             if [ "$i" -eq 30 ]; then
               echo "✗ Timed out waiting for gateway"
               docker logs llm-gateway-test
+              docker inspect llm-gateway-test --format='{{.State.Status}} {{.State.ExitCode}}' || true
               exit 1
             fi
             echo "  Waiting... (attempt $i/30)"
