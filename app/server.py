@@ -350,7 +350,7 @@ async def chat_completions(request: Request):
 
 @app.get("/v1/models")
 @app.get("/models")
-async def list_models():
+async def list_models(key_info: dict = Depends(verify_virtual_key)):
     """List available models."""
     models = []
     seen = set()
@@ -375,14 +375,14 @@ async def health():
 
 
 @app.get("/metrics")
-async def prometheus_metrics():
-    """Prometheus-compatible metrics endpoint (no auth required)."""
+async def prometheus_metrics(admin: dict = Depends(verify_admin)):
+    """Prometheus-compatible metrics endpoint (admin auth required)."""
     text = await db.get_prometheus_metrics()
     return Response(content=text, media_type="text/plain; version=0.0.4; charset=utf-8")
 
 
 @app.get("/api/health/providers")
-async def health_providers():
+async def health_providers(admin: dict = Depends(verify_admin)):
     """Check connectivity to all configured upstream providers.
 
     Returns per-provider status: reachable/unreachable/error with latency.
