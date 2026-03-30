@@ -17,6 +17,8 @@
             <span>Out: <span class="text-gray-200 font-mono" x-text="formatTokens(requestDetail?.output_tokens || 0)"></span></span>
             <span>Cost: <span class="text-green-400 font-mono" x-text="'$' + (requestDetail?.cost || 0).toFixed(4)"></span></span>
             <span>Latency: <span class="text-gray-200 font-mono" x-text="(requestDetail?.latency_ms || 0).toFixed(0) + 'ms'"></span></span>
+            <span x-show="requestDetail?.time_to_first_token_ms != null">TTFT: <span class="text-gray-200 font-mono" x-text="formatTTFT(requestDetail?.time_to_first_token_ms)"></span></span>
+            <span x-show="requestDetail?.tokens_per_second != null">TPS: <span class="text-gray-200 font-mono" x-text="formatTPS(requestDetail?.tokens_per_second)"></span></span>
             <span x-show="requestDetail?.error_message" class="text-red-400">Error: <span x-text="requestDetail?.error_message"></span></span>
         </div>
         <!-- Body tabs -->

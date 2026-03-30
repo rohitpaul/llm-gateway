@@ -311,6 +311,8 @@ async def chat_completions(request: Request):
                     error_message=meta.get("error_message"),
                     source_ip=request.client.host if request.client else None,
                     request_body=_serialize_body(body),
+                    time_to_first_token_ms=meta.get("time_to_first_token_ms"),
+                    tokens_per_second=meta.get("tokens_per_second"),
                 )
             except Exception as e:
                 print(f"Stream logging error: {e}")
@@ -339,6 +341,8 @@ async def chat_completions(request: Request):
         source_ip=request.client.host if request.client else None,
         request_body=_serialize_body(body),
         response_body=_serialize_body(response),
+        time_to_first_token_ms=meta.get("time_to_first_token_ms"),
+        tokens_per_second=meta.get("tokens_per_second"),
     )
 
     return JSONResponse(content=response)

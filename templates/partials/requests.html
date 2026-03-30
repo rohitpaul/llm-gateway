@@ -12,6 +12,8 @@
                         <th class="px-4 py-3 text-right">Tokens Out</th>
                         <th class="px-4 py-3 text-right">Cost</th>
                         <th class="px-4 py-3 text-right hide-mobile">Latency</th>
+                        <th class="px-4 py-3 text-right hide-mobile">TTFT</th>
+                        <th class="px-4 py-3 text-right hide-mobile">TPS</th>
                         <th class="px-4 py-3 text-center">Status</th>
                     </tr>
                 </thead>
@@ -26,6 +28,8 @@
                             <td class="px-4 py-1 text-right font-mono" x-text="formatTokens(r.output_tokens)" data-label="Out"></td>
                             <td class="px-4 py-1 text-right font-mono text-green-400" x-text="'$' + (r.cost || 0).toFixed(4)" data-label="Cost"></td>
                             <td class="px-4 py-2.5 text-right font-mono text-gray-400 hide-mobile" x-text="(r.latency_ms || 0).toFixed(0) + 'ms'" data-label="Latency"></td>
+                            <td class="px-4 py-2.5 text-right font-mono text-gray-400 hide-mobile" x-text="formatTTFT(r.time_to_first_token_ms)" data-label="TTFT"></td>
+                            <td class="px-4 py-2.5 text-right font-mono text-gray-400 hide-mobile" x-text="formatTPS(r.tokens_per_second)" data-label="TPS"></td>
                             <td class="px-4 py-1 text-right" data-label="">
                                 <span x-show="r.status==='success'" class="text-green-500">✓</span>
                                 <span x-show="r.status==='error'" class="text-red-500" :title="r.error_message">✗</span>

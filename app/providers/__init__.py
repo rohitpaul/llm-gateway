@@ -190,6 +190,8 @@ async def proxy_chat_completions(
         cache_read = usage.get("prompt_tokens_details", {}).get("cached_tokens", 0) if isinstance(usage.get("prompt_tokens_details"), dict) else 0
 
         cost = calculate_cost(model, input_tokens, output_tokens, cache_read)
+        # For non-streaming: TTFT = full latency, TPS = output_tokens / (latency_ms / 1000)
+        tps = output_tokens / (latency_ms / 1000) if latency_ms > 0 and output_tokens > 0 else None
         meta.update(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
@@ -197,6 +199,8 @@ async def proxy_chat_completions(
             cache_write_tokens=0,
             cost=cost,
             latency_ms=latency_ms,
+            time_to_first_token_ms=latency_ms,
+            tokens_per_second=tps,
         )
         return resp_json, meta
 
@@ -214,6 +218,7 @@ async def _handle_stream(
     """Handle streaming responses — pass through SSE chunks."""
     async def stream_generator():
         usage_data = {"input_tokens": 0, "output_tokens": 0, "cache_read": 0}
+        first_token_time = None
         try:
             async with client.stream("POST", url, headers=headers, json=body) as resp:
                 if resp.status_code >= 400:
@@ -232,12 +237,24 @@ async def _handle_stream(
                             # Calculate cost from accumulated usage
                             latency_ms = (time.monotonic() - start) * 1000
                             cost = calculate_cost(model, usage_data["input_tokens"], usage_data["output_tokens"], usage_data["cache_read"])
+                            # Calculate TPS: output tokens / generation duration in seconds
+                            end_time = time.monotonic()
+                            out_tokens = usage_data["output_tokens"]
+                            if first_token_time is not None and out_tokens > 0:
+                                gen_duration_s = (end_time - first_token_time)
+                                tps = out_tokens / gen_duration_s if gen_duration_s > 0 else None
+                            else:
+                                tps = None
+                            # TTFT: time from start to first content token
+                            ttft_ms = (first_token_time - start) * 1000 if first_token_time is not None else None
                             meta.update(
                                 input_tokens=usage_data["input_tokens"],
                                 output_tokens=usage_data["output_tokens"],
                                 cache_read_tokens=usage_data["cache_read"],
                                 cost=cost,
                                 latency_ms=latency_ms,
+                                time_to_first_token_ms=ttft_ms,
+                                tokens_per_second=tps,
                             )
                             yield b"data: [DONE]\n\n"
                             return
@@ -253,6 +270,12 @@ async def _handle_stream(
                                 elif parsed.get("type") == "message_delta":
                                     u = parsed.get("usage", {})
                                     usage_data["output_tokens"] += u.get("output_tokens", 0)
+                                elif parsed.get("type") == "content_block_delta":
+                                    # First content-bearing chunk for Anthropic
+                                    if first_token_time is None:
+                                        delta = parsed.get("delta", {})
+                                        if delta.get("type") == "text_delta" and delta.get("text"):
+                                            first_token_time = time.monotonic()
                             else:
                                 # OpenAI-compatible streaming usage (in last chunk)
                                 u = parsed.get("usage", {})
@@ -268,6 +291,14 @@ async def _handle_stream(
                                     if timings:
                                         usage_data["input_tokens"] = timings.get("prompt_n", 0)
                                         usage_data["output_tokens"] = timings.get("predicted_n", 0)
+                                # Detect first content token for OpenAI-compatible
+                                if first_token_time is None:
+                                    choices = parsed.get("choices", [])
+                                    if choices:
+                                        delta = choices[0].get("delta", {})
+                                        content = delta.get("content")
+                                        if content is not None and delta.get("role") is None:
+                                            first_token_time = time.monotonic()
                         except (json.JSONDecodeError, KeyError, TypeError):
                             pass
                     yield (line + "\n\n").encode()

@@ -573,6 +573,17 @@ function gateway() {
             return d.toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
         },
 
+        formatTTFT(ms) {
+            if (ms == null) return '—';
+            if (ms >= 1000) return (ms / 1000).toFixed(1) + 's';
+            return ms.toFixed(0) + 'ms';
+        },
+
+        formatTPS(tps) {
+            if (tps == null) return '—';
+            return tps.toFixed(1) + ' tok/s';
+        },
+
         // Model Management Functions
         async loadModels() {
             try {

@@ -24,7 +24,7 @@ from app import config
 # ---------------------------------------------------------------------------
 
 # Current schema version — bump when adding migrations.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _CREATE_SCHEMA_META = """
 CREATE TABLE IF NOT EXISTS _schema_meta (
@@ -112,6 +112,12 @@ _MIGRATIONS: dict[int, list[str]] = {
             updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
         );
         """,
+    ],
+    # v3: Add TTFT and TPS columns to requests table
+    3: [
+        "ALTER TABLE requests ADD COLUMN time_to_first_token_ms REAL;",
+        "ALTER TABLE requests ADD COLUMN tokens_per_second REAL;",
+        "CREATE INDEX IF NOT EXISTS idx_requests_ttft ON requests(time_to_first_token_ms);",
     ],
 }
 
@@ -317,6 +323,8 @@ class Database:
         source_ip: str | None = None,
         request_body: str | None = None,
         response_body: str | None = None,
+        time_to_first_token_ms: float | None = None,
+        tokens_per_second: float | None = None,
     ) -> int:
         """Insert a request log row. Returns the new row id."""
         # Single transaction: insert request, update key usage, upsert daily — one commit.
@@ -327,8 +335,9 @@ class Database:
                 input_tokens, output_tokens,
                 cache_read_tokens, cache_write_tokens,
                 cost, latency_ms, status, error_message, source_ip,
-                request_body, response_body
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                request_body, response_body,
+                time_to_first_token_ms, tokens_per_second
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 virtual_key_id, request_id, model, provider,
@@ -336,6 +345,7 @@ class Database:
                 cache_read, cache_write,
                 cost, latency_ms, status, error_message, source_ip,
                 request_body, response_body,
+                time_to_first_token_ms, tokens_per_second,
             ),
         ) as cursor:
             inserted_id = cursor.lastrowid
@@ -419,7 +429,8 @@ class Database:
         data_sql = (
             f"SELECT r.id, r.virtual_key_id, vk.name as key_name, r.request_id, r.model, r.provider, "
             f"r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_write_tokens, "
-            f"r.cost, r.latency_ms, r.status, r.error_message, r.source_ip, r.created_at "
+            f"r.cost, r.latency_ms, r.status, r.error_message, r.source_ip, r.created_at, "
+            f"r.time_to_first_token_ms, r.tokens_per_second "
             f"FROM requests r "
             f"LEFT JOIN virtual_keys vk ON r.virtual_key_id = vk.id "
             f"{where} ORDER BY r.created_at DESC LIMIT ? OFFSET ?"
