@@ -17,6 +17,10 @@ if not _raw_admin_key:
     raise SystemExit("FATAL: GATEWAY_ADMIN_KEY environment variable is required. Set it in .env or docker-compose.yml.")
 ADMIN_KEY = _raw_admin_key
 
+# CORS: comma-separated origins (e.g. "http://localhost:4000,https://gw.example.com")
+# Empty = no CORS. Use "*" explicitly to allow all (not recommended).
+CORS_ORIGINS: list[str] = [o.strip() for o in os.getenv("GATEWAY_CORS_ORIGINS", "").split(",") if o.strip()]
+
 
 def load_config(path: str = DEFAULT_CONFIG_PATH) -> dict:
     """Load config.yaml with provider settings and model routing."""

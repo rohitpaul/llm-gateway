@@ -14,6 +14,7 @@ services:
     environment:
       - GATEWAY_DB=/data/gateway.db
       - GATEWAY_ADMIN_KEY=${GATEWAY_ADMIN_KEY:?GATEWAY_ADMIN_KEY must be set}
+      - GATEWAY_CORS_ORIGINS=${GATEWAY_CORS_ORIGINS:-}
       - TZ=America/New_York
 
 volumes:

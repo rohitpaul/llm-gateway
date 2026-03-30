@@ -240,7 +240,11 @@ async def lifespan(app: FastAPI):
 # ---------------------------------------------------------------------------
 
 app = FastAPI(title="LLM Gateway", version="0.1.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+_cors_origins = config.CORS_ORIGINS or []
+if "*" in _cors_origins:
+    print("WARNING: GATEWAY_CORS_ORIGINS=* allows all origins - use only in development")
+if _cors_origins:
+    app.add_middleware(CORSMiddleware, allow_origins=_cors_origins, allow_methods=["*"], allow_headers=["*"])
 
 
 # ---------------------------------------------------------------------------
