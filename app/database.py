@@ -462,6 +462,43 @@ class Database:
             rows = await cur.fetchall()
         return _rows_to_dicts(rows)
 
+    async def get_hourly_stats(
+        self,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        key_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Aggregate requests by hour from the raw requests table."""
+        conditions: list[str] = ["status = 'success'"]
+        params: list[Any] = []
+
+        if date_from is not None:
+            conditions.append("DATE(created_at) >= ?")
+            params.append(date_from)
+        if date_to is not None:
+            conditions.append("DATE(created_at) <= ?")
+            params.append(date_to)
+        if key_id is not None:
+            conditions.append("virtual_key_id = ?")
+            params.append(key_id)
+
+        where = "WHERE " + " AND ".join(conditions)
+        sql = f"""
+            SELECT
+                strftime('%Y-%m-%d %H:00', created_at) AS hour,
+                COUNT(*) AS request_count,
+                COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                COALESCE(SUM(cost), 0) AS cost
+            FROM requests
+            {where}
+            GROUP BY hour
+            ORDER BY hour ASC
+        """
+        async with self.db.execute(sql, params) as cur:
+            rows = await cur.fetchall()
+        return _rows_to_dicts(rows)
+
     async def get_model_stats(
         self,
         date_from: str | None = None,

@@ -471,6 +471,14 @@ async def stats_daily(request: Request, admin: dict = Depends(verify_admin)):
     return {"daily": await db.get_daily_stats(date_from, date_to, key_id)}
 
 
+@app.get("/api/stats/hourly")
+async def stats_hourly(request: Request, admin: dict = Depends(verify_admin)):
+    date_from = request.query_params.get("date_from")
+    date_to = request.query_params.get("date_to")
+    key_id = _int_param(request, "key_id")
+    return {"hourly": await db.get_hourly_stats(date_from, date_to, key_id)}
+
+
 @app.get("/api/requests")
 async def list_requests(request: Request, admin: dict = Depends(verify_admin)):
     key_id = _int_param(request, "key_id")

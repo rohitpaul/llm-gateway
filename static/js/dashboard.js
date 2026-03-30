@@ -21,6 +21,7 @@ function gateway() {
         providerHealthLoading: false,
 
         // Chart state
+        chartMode: 'daily',   // 'daily' | 'hourly'
         chartDays: 7,
         chartInstances: {},
         dailyStatsData: null,
@@ -174,19 +175,35 @@ function gateway() {
             this.providerHealthLoading = false;
         },
 
-        async loadDailyStats() {
+        async loadChartData() {
             try {
-                const from = new Date();
-                from.setDate(from.getDate() - this.chartDays);
-                const dateFrom = from.toISOString().slice(0, 10);
-                const r = await this.apiFetch('/api/stats/daily?date_from=' + dateFrom);
-                if (!r.ok) return;
-                this.dailyStatsData = (await r.json()).daily || [];
-                this._renderCharts(this.dailyStatsData);
+                if (this.chartMode === 'hourly') {
+                    // Last 48 hours of hourly data
+                    const from = new Date();
+                    from.setHours(from.getHours() - 48);
+                    const dateFrom = from.toISOString().slice(0, 10);
+                    const r = await this.apiFetch('/api/stats/hourly?date_from=' + dateFrom);
+                    if (!r.ok) return;
+                    const hourly = (await r.json()).hourly || [];
+                    this._renderChartsHourly(hourly);
+                } else {
+                    const from = new Date();
+                    from.setDate(from.getDate() - this.chartDays);
+                    const dateFrom = from.toISOString().slice(0, 10);
+                    const r = await this.apiFetch('/api/stats/daily?date_from=' + dateFrom);
+                    if (!r.ok) return;
+                    this.dailyStatsData = (await r.json()).daily || [];
+                    this._renderChartsDaily(this.dailyStatsData);
+                }
             } catch {}
         },
 
-        _renderCharts(data) {
+        async loadDailyStats() {
+            // Backwards compat — called from loadAll for refresh
+            return this.loadChartData();
+        },
+
+        _renderChartsDaily(data) {
             // Aggregate by date
             const dayMap = {};
             const now = new Date();
@@ -305,6 +322,108 @@ function gateway() {
                     legend: { labels: { colors: '#d1d5db' }, fontSize: '11px' },
                     tooltip: { theme: 'dark' },
                     theme: { mode: 'dark' },
+                });
+                this.chartInstances.cost.render();
+            }
+        },
+
+        _renderChartsHourly(data) {
+            // Build hour map for last 48 hours
+            const hourMap = {};
+            const now = new Date();
+            for (let i = 47; i >= 0; i--) {
+                const d = new Date(now);
+                d.setHours(d.getHours() - i);
+                const key = d.getFullYear() + '-' +
+                    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                    String(d.getDate()).padStart(2, '0') + ' ' +
+                    String(d.getHours()).padStart(2, '0') + ':00';
+                hourMap[key] = { requests: 0, input_tokens: 0, output_tokens: 0, cost: 0 };
+            }
+            for (const row of data) {
+                if (!hourMap[row.hour]) hourMap[row.hour] = { requests: 0, input_tokens: 0, output_tokens: 0, cost: 0 };
+                hourMap[row.hour].requests += row.request_count || 0;
+                hourMap[row.hour].input_tokens += row.input_tokens || 0;
+                hourMap[row.hour].output_tokens += row.output_tokens || 0;
+                hourMap[row.hour].cost += row.cost || 0;
+            }
+            const hours = Object.keys(hourMap).sort();
+            const labels = hours.map(h => {
+                const parts = h.split(' ');
+                const d = new Date(parts[0] + 'T' + parts[1]);
+                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' +
+                       d.toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
+            });
+
+            // Common chart options builder
+            const baseChart = {
+                height: '100%',
+                background: 'transparent',
+                toolbar: { show: false },
+                fontFamily: 'inherit',
+                animations: { enabled: false },
+            };
+            const baseXaxis = {
+                categories: labels,
+                axisBorder: { show: false },
+                axisTicks: { show: false },
+                labels: { style: { colors: '#9ca3af', fontSize: '10px' }, rotate: -45, rotateAlways: true },
+            };
+            const baseGrid = { borderColor: 'rgba(255,255,255,0.06)', strokeDashArray: 3 };
+            const baseLegend = { labels: { colors: '#d1d5db' }, fontSize: '11px' };
+            const baseTheme = { mode: 'dark' };
+
+            // Tokens chart — stacked bar (input/output) + line (requests)
+            const tokEl = document.getElementById('chartTokens');
+            if (tokEl) {
+                if (this.chartInstances.tokens) this.chartInstances.tokens.destroy();
+                this.chartInstances.tokens = new ApexCharts(tokEl, {
+                    chart: { ...baseChart, type: 'bar', stacked: true },
+                    series: [
+                        { name: 'Input Tokens (K)', type: 'column', data: hours.map(h => (hourMap[h].input_tokens || 0) / 1000) },
+                        { name: 'Output Tokens (K)', type: 'column', data: hours.map(h => (hourMap[h].output_tokens || 0) / 1000) },
+                        { name: 'Requests', type: 'line', data: hours.map(h => hourMap[h].requests) },
+                    ],
+                    colors: ['#3b82f6', '#a78bfa', '#34d399'],
+                    stroke: { width: [0, 0, 2], curve: 'smooth' },
+                    plotOptions: { bar: { borderRadius: 3, columnWidth: '55%' } },
+                    dataLabels: { enabled: false },
+                    xaxis: baseXaxis,
+                    yaxis: [
+                        { title: { text: 'Tokens (K)', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' } } },
+                        { opposite: true, title: { text: 'Requests', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' } } },
+                    ],
+                    grid: baseGrid,
+                    legend: baseLegend,
+                    tooltip: { theme: 'dark' },
+                    theme: baseTheme,
+                });
+                this.chartInstances.tokens.render();
+            }
+
+            // Output tokens chart — bar (output tokens) + line (cost)
+            const costEl = document.getElementById('chartCost');
+            if (costEl) {
+                if (this.chartInstances.cost) this.chartInstances.cost.destroy();
+                this.chartInstances.cost = new ApexCharts(costEl, {
+                    chart: { ...baseChart, type: 'bar' },
+                    series: [
+                        { name: 'Output Tokens (K)', type: 'column', data: hours.map(h => (hourMap[h].output_tokens || 0) / 1000) },
+                        { name: 'Cost ($)', type: 'line', data: hours.map(h => hourMap[h].cost) },
+                    ],
+                    colors: ['#fbbf24', '#f87171'],
+                    stroke: { width: [0, 2], curve: 'smooth' },
+                    plotOptions: { bar: { borderRadius: 3, columnWidth: '55%' } },
+                    dataLabels: { enabled: false },
+                    xaxis: baseXaxis,
+                    yaxis: [
+                        { title: { text: 'Output Tokens (K)', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' } } },
+                        { opposite: true, title: { text: 'Cost ($)', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' }, formatter: v => '$' + (v || 0).toFixed(4) } },
+                    ],
+                    grid: baseGrid,
+                    legend: baseLegend,
+                    tooltip: { theme: 'dark' },
+                    theme: baseTheme,
                 });
                 this.chartInstances.cost.render();
             }
