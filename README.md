@@ -136,9 +136,10 @@ providers:
 | `DEEPSEEK_API_KEY` | DeepSeek API key | |
 | `GROQ_API_KEY` | Groq API key | |
 | `MISTRAL_API_KEY` | Mistral API key | |
-| `GATEWAY_ADMIN_KEY` | Admin key for dashboard/management | `sk-admin-change-me` |
+| `GATEWAY_ADMIN_KEY` | Admin key for dashboard/management | *(required — server exits if unset)* |
 | `GATEWAY_DB` | SQLite database path | `data/gateway.db` |
 | `GATEWAY_PORT` | Server port | `4000` |
+| `GATEWAY_CORS_ORIGINS` | Comma-separated allowed CORS origins | *(empty = no CORS)* |
 
 ## License
 
