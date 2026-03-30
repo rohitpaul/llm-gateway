@@ -11,7 +11,6 @@ RUN pip install --no-cache-dir fastapi[standard] uvicorn[standard] httpx aiosqli
 COPY app/ app/
 COPY templates/ templates/
 COPY static/ static/
-COPY config.yaml config.yaml
 
 VOLUME /data
 
