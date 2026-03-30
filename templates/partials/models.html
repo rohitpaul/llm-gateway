@@ -64,6 +64,7 @@
                             <th class="px-4 py-3 text-left hide-mobile">Provider</th>
                             <th class="px-4 py-3 text-right hide-mobile">Input / 1M</th>
                             <th class="px-4 py-3 text-right hide-mobile">Output / 1M</th>
+                            <th class="px-4 py-3 text-right hide-mobile">Cache / 1M</th>
                             <th class="px-4 py-3 text-right">Actions</th>
                         </tr>
                     </thead>
@@ -74,6 +75,7 @@
                                 <td class="px-4 py-2.5 capitalize text-gray-400 hide-mobile" x-text="model.provider"></td>
                                 <td class="px-4 py-2.5 text-right font-mono text-xs hide-mobile" x-text="model.input != null ? '$' + model.input : '—'"></td>
                                 <td class="px-4 py-2.5 text-right font-mono text-xs hide-mobile" x-text="model.output != null ? '$' + model.output : '—'"></td>
+                                <td class="px-4 py-2.5 text-right font-mono text-xs hide-mobile" x-text="model.cache_read != null ? '$' + model.cache_read : '—'"></td>
                                 <td class="px-4 py-2.5 text-right">
                                     <div class="flex items-center justify-end gap-2">
                                         <button @click="editModel(model.name)"
