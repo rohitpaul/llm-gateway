@@ -4,7 +4,7 @@ services:
     container_name: llm-gateway
     restart: unless-stopped
     ports:
-      - "${GATEWAY_PORT:-4000}:${GATEWAY_PORT:-4000}"
+      - "${GATEWAY_PORT:-4000}:4000"
     volumes:
       - llm-gateway-data:/data
       - ./config.yaml:/app/config.yaml:ro
@@ -14,7 +14,6 @@ services:
     environment:
       - GATEWAY_DB=/data/gateway.db
       - GATEWAY_ADMIN_KEY=${GATEWAY_ADMIN_KEY:-sk-admin-change-me}
-      - GATEWAY_PORT=${GATEWAY_PORT:-4000}
       - TZ=America/New_York
 
 volumes:
