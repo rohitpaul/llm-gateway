@@ -178,9 +178,9 @@ function gateway() {
         async loadChartData() {
             try {
                 if (this.chartMode === 'hourly') {
-                    // Last 48 hours of hourly data
+                    // Last 6 hours of hourly data
                     const from = new Date();
-                    from.setHours(from.getHours() - 48);
+                    from.setHours(from.getHours() - 6);
                     const dateFrom = from.toISOString().slice(0, 10);
                     const r = await this.apiFetch('/api/stats/hourly?date_from=' + dateFrom);
                     if (!r.ok) return;
@@ -328,10 +328,10 @@ function gateway() {
         },
 
         _renderChartsHourly(data) {
-            // Build hour map for last 48 hours
+            // Build hour map for last 6 hours
             const hourMap = {};
             const now = new Date();
-            for (let i = 47; i >= 0; i--) {
+            for (let i = 5; i >= 0; i--) {
                 const d = new Date(now);
                 d.setHours(d.getHours() - i);
                 const key = d.getFullYear() + '-' +
