@@ -13,7 +13,7 @@ services:
         required: false
     environment:
       - GATEWAY_DB=/data/gateway.db
-      - GATEWAY_ADMIN_KEY=${GATEWAY_ADMIN_KEY:-sk-admin-change-me}
+      - GATEWAY_ADMIN_KEY=${GATEWAY_ADMIN_KEY:?GATEWAY_ADMIN_KEY must be set}
       - TZ=America/New_York
 
 volumes:
