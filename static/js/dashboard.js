@@ -23,7 +23,7 @@ function gateway() {
         editingProviderName: null,
         editingModelName: null,
         providerForm: { name: '', base_url: '', api_key: '' },
-        modelForm: { name: '', provider: '' },
+        modelForm: { name: '', provider: '', input: '', output: '', cache_read: '' },
 
         // Request detail modal
         requestDetail: null,
@@ -614,12 +614,14 @@ function gateway() {
                     // Build models list
                     this.modelsList = Object.entries(config.models || {}).map(([name, cfg]) => {
                         if (typeof cfg === 'string') {
-                            return { name: name, provider: cfg, base_url: '' };
+                            return { name: name, provider: cfg, input: null, output: null, cache_read: null };
                         }
                         return {
                             name: name,
                             provider: cfg?.provider || '',
-                            base_url: cfg?.base_url || '',
+                            input: cfg?.input ?? null,
+                            output: cfg?.output ?? null,
+                            cache_read: cfg?.cache_read ?? null,
                         };
                     });
                 }
@@ -632,7 +634,7 @@ function gateway() {
         },
 
         resetModelForm() {
-            this.modelForm = { name: '', provider: '' };
+            this.modelForm = { name: '', provider: '', input: '', output: '', cache_read: '' };
             this.editingModelName = null;
         },
 
@@ -672,7 +674,13 @@ function gateway() {
             // Find model in current list
             const model = this.modelsList.find(m => m.name === name);
             if (model) {
-                this.modelForm = { name: model.name, provider: model.provider };
+                this.modelForm = {
+                    name: model.name,
+                    provider: model.provider,
+                    input: model.input != null ? model.input : '',
+                    output: model.output != null ? model.output : '',
+                    cache_read: model.cache_read != null ? model.cache_read : '',
+                };
             }
         },
 
@@ -721,7 +729,11 @@ function gateway() {
                 
                 // Update models
                 if (!config.models) config.models = {};
-                config.models[this.modelForm.name] = { provider: this.modelForm.provider };
+                const priceCfg = { provider: this.modelForm.provider };
+                if (this.modelForm.input !== '') priceCfg.input = parseFloat(this.modelForm.input);
+                if (this.modelForm.output !== '') priceCfg.output = parseFloat(this.modelForm.output);
+                if (this.modelForm.cache_read !== '') priceCfg.cache_read = parseFloat(this.modelForm.cache_read);
+                config.models[this.modelForm.name] = priceCfg;
                 
                 // Save
                 await this.apiFetch('/api/config', {

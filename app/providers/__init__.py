@@ -61,8 +61,25 @@ def calculate_cost(
     input_tokens: int,
     output_tokens: int,
     cache_read_tokens: int = 0,
+    cfg: dict | None = None,
 ) -> float:
-    """Calculate cost in USD for a request."""
+    """Calculate cost in USD for a request.
+
+    Per-model prices from config take precedence over the global PRICING dict.
+    Config format: models.<name> = { "input": float, "output": float, "cache_read": float }
+    All prices are per 1M tokens.
+    """
+    # Check config-based per-model pricing first
+    if cfg is not None:
+        model_cfg = cfg.get("models", {}).get(model, {})
+        if isinstance(model_cfg, dict) and ("input" in model_cfg or "output" in model_cfg):
+            input_price = model_cfg.get("input", 0) / 1_000_000
+            output_price = model_cfg.get("output", 0) / 1_000_000
+            cache_price = model_cfg.get("cache_read", model_cfg.get("input", 0) / 1_000_000 * 0.5) / 1_000_000
+            regular_input = max(0, input_tokens - cache_read_tokens)
+            return (regular_input * input_price) + (cache_read_tokens * cache_price) + (output_tokens * output_price)
+
+    # Fall back to global PRICING dict
     prices = PRICING.get(model, {"input": 0, "output": 0})
     input_price = prices.get("input", 0) / 1_000_000
     output_price = prices.get("output", 0) / 1_000_000
@@ -165,7 +182,7 @@ async def proxy_chat_completions(
     if stream:
         # Client must stay alive for streaming — closed in _handle_stream finally block
         client = httpx.AsyncClient(timeout=timeout)
-        return await _handle_stream(client, url, headers, req_body, model, provider, start, meta)
+        return await _handle_stream(client, url, headers, req_body, model, provider, start, meta, cfg)
 
     async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(url, headers=headers, json=req_body)
@@ -189,7 +206,7 @@ async def proxy_chat_completions(
         output_tokens = usage.get("completion_tokens", 0)
         cache_read = usage.get("prompt_tokens_details", {}).get("cached_tokens", 0) if isinstance(usage.get("prompt_tokens_details"), dict) else 0
 
-        cost = calculate_cost(model, input_tokens, output_tokens, cache_read)
+        cost = calculate_cost(model, input_tokens, output_tokens, cache_read, cfg)
         # For non-streaming: TTFT = full latency, TPS = output_tokens / (latency_ms / 1000)
         tps = output_tokens / (latency_ms / 1000) if latency_ms > 0 and output_tokens > 0 else None
         meta.update(
@@ -214,6 +231,7 @@ async def _handle_stream(
     provider: str,
     start: float,
     meta: dict,
+    cfg: dict | None,
 ) -> tuple[AsyncIterator[bytes], dict]:
     """Handle streaming responses — pass through SSE chunks."""
     async def stream_generator():
@@ -236,7 +254,7 @@ async def _handle_stream(
                         if chunk.strip() == "[DONE]":
                             # Calculate cost from accumulated usage
                             latency_ms = (time.monotonic() - start) * 1000
-                            cost = calculate_cost(model, usage_data["input_tokens"], usage_data["output_tokens"], usage_data["cache_read"])
+                            cost = calculate_cost(model, usage_data["input_tokens"], usage_data["output_tokens"], usage_data["cache_read"], cfg)
                             # Calculate TPS: output tokens / generation duration in seconds
                             end_time = time.monotonic()
                             out_tokens = usage_data["output_tokens"]
