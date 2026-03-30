@@ -7,7 +7,7 @@ services:
       - "${GATEWAY_PORT:-4000}:4000"
     volumes:
       - llm-gateway-data:/data
-      - /mnt/user/appdata/llm-gateway/config.yaml:/app/config.yaml:ro
+      - ${GATEWAY_CONFIG_PATH:-./config.yaml}:/app/config.yaml:ro
     env_file:
       - path: .env
         required: false
