@@ -20,7 +20,7 @@ import httpx
 
 from app import config
 from app.database import Database
-from app.providers import proxy_chat_completions, resolve_provider, calculate_cost, PRICING, _infer_provider, _get_api_key
+from app.providers import proxy_chat_completions, resolve_provider, calculate_cost, PRICING, _infer_provider, _get_api_key, _get_base_url
 
 # Max body size to store in the DB (bytes) — larger bodies are truncated
 _MAX_BODY_SIZE = 100_000  # 100 KB
@@ -32,6 +32,99 @@ _MAX_BODY_SIZE = 100_000  # 100 KB
 db = Database()
 app_config: dict = {}
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "..", "templates"))
+
+
+def _load_merged_config() -> dict:
+    """Load base config from file, then overlay DB overrides if available.
+
+    DB overrides are stored as JSON blobs keyed by 'models' and 'providers'.
+    DB values take precedence over file values for these keys.
+    """
+    base = config.load_config()
+    # DB overrides are applied in lifespan / on-demand after DB is connected.
+    # This function returns just the file config as a base.
+    return base
+
+
+async def _apply_db_overrides(cfg: dict) -> dict:
+    """Apply DB config overrides on top of the given config dict.
+
+    Returns a new dict with DB values merged in (DB takes precedence for
+    'models' and 'providers' keys).
+    """
+    if not db._db:
+        return cfg
+    merged = dict(cfg)
+    try:
+        overrides = await db.get_all_config_overrides()
+        for key in ("models", "providers"):
+            if key in overrides:
+                import json as _json
+                merged[key] = _json.loads(overrides[key])
+    except Exception:
+        pass
+    return merged
+
+
+def _build_providers_info(cfg: dict) -> list[dict]:
+    """Build a list of all providers with their status.
+
+    Combines built-in providers (from PROVIDER_BASE_URLS) with custom providers
+    from config. Checks env vars for API keys on built-in providers.
+    """
+    providers_info: list[dict] = []
+    seen_names: set[str] = set()
+    provider_cfg = cfg.get("providers", {})
+
+    # Built-in providers
+    for name, base_url in config.PROVIDER_BASE_URLS.items():
+        env_key = config.get_provider_api_key(name)
+        cfg_key = None
+        p_cfg = provider_cfg.get(name, {})
+        if isinstance(p_cfg, dict):
+            cfg_key = p_cfg.get("api_key")
+
+        has_api_key = bool(env_key or cfg_key)
+        effective_base_url = base_url
+        if isinstance(p_cfg, dict) and "base_url" in p_cfg:
+            effective_base_url = p_cfg["base_url"]
+
+        providers_info.append({
+            "name": name,
+            "base_url": effective_base_url,
+            "has_api_key": has_api_key,
+            "is_built_in": True,
+            "is_configured": has_api_key,
+        })
+        seen_names.add(name)
+
+    # Custom providers from config
+    for name, p_cfg in provider_cfg.items():
+        if name in seen_names:
+            continue
+        if not isinstance(p_cfg, dict):
+            continue
+        cfg_key = p_cfg.get("api_key")
+        env_key = config.get_provider_api_key(name)
+        has_api_key = bool(env_key or cfg_key)
+        # Custom providers with a base_url pointing to local/self-hosted
+        # endpoints are considered configured even without an API key.
+        base_url = p_cfg.get("base_url", "")
+        is_local = any(
+            local_hint in base_url.lower()
+            for local_hint in ("localhost", "127.0.0.1", "10.", "192.168.", "172.", "http://")
+        ) and not has_api_key
+
+        providers_info.append({
+            "name": name,
+            "base_url": base_url,
+            "has_api_key": has_api_key,
+            "is_built_in": False,
+            "is_configured": has_api_key or is_local,
+        })
+        seen_names.add(name)
+
+    return providers_info
 
 
 
@@ -135,7 +228,7 @@ async def verify_admin(request: Request) -> dict:
 async def lifespan(app: FastAPI):
     global app_config
     await db.connect()
-    app_config = config.load_config()
+    app_config = await _apply_db_overrides(config.load_config())
     print(f"✓ LLM Gateway started — {config.DEFAULT_HOST}:{config.DEFAULT_PORT}")
     print(f"  Dashboard: http://{config.DEFAULT_HOST}:{config.DEFAULT_PORT}/")
     yield
@@ -505,72 +598,82 @@ async def get_request(request_id: int, admin: dict = Depends(verify_admin)):
 # Model Management API
 # ---------------------------------------------------------------------------
 
+@app.get("/api/providers")
+async def get_providers(admin: dict = Depends(verify_admin)):
+    """Get all providers (built-in + custom) with their configuration status."""
+    return {"providers": _build_providers_info(app_config)}
+
+
 @app.get("/api/config")
 async def get_config(admin: dict = Depends(verify_admin)):
-    """Get current config (models and providers)."""
+    """Get current config (models and providers) with provider status info."""
     return {
         "models": app_config.get("models", {}),
         "providers": app_config.get("providers", {}),
+        "providers_info": _build_providers_info(app_config),
     }
+
+
+async def _reload_config():
+    """Reload config from file + DB overrides and update the global."""
+    global app_config
+    app_config = await _apply_db_overrides(config.load_config())
 
 
 @app.post("/api/config")
 async def update_config(data: dict, admin: dict = Depends(verify_admin)):
-    """Update config (models and providers)."""
-    import yaml
-    
-    new_config = {
-        "models": data.get("models", {}),
-        "providers": data.get("providers", {}),
-    }
-    
-    config_path = os.getenv("GATEWAY_CONFIG", "config.yaml")
-    with open(config_path, "w") as f:
-        yaml.dump(new_config, f, default_flow_style=False, sort_keys=False)
-    
-    # Reload config
-    global app_config
-    app_config = config.load_config(config_path)
-    
+    """Update config (models and providers) — persisted to DB, not file."""
+    overrides = {}
+    if "models" in data:
+        overrides["models"] = json.dumps(data["models"], ensure_ascii=False)
+    if "providers" in data:
+        overrides["providers"] = json.dumps(data["providers"], ensure_ascii=False)
+
+    if overrides:
+        await db.set_config_overrides_bulk(overrides)
+
+    await _reload_config()
     return {"message": "Config updated successfully"}
 
 
 @app.delete("/api/providers/{provider_name}")
 async def delete_provider(provider_name: str, admin: dict = Depends(verify_admin)):
-    """Delete a provider from config."""
+    """Delete a custom provider from config overrides."""
     if provider_name in config.PROVIDER_BASE_URLS:
         raise HTTPException(status_code=400, detail="Cannot delete built-in provider")
-    
-    new_config = app_config.copy()
-    if "providers" in new_config and provider_name in new_config["providers"]:
-        del new_config["providers"][provider_name]
-    
-    import yaml
-    config_path = os.getenv("GATEWAY_CONFIG", "config.yaml")
-    with open(config_path, "w") as f:
-        yaml.dump(new_config, f, default_flow_style=False, sort_keys=False)
-    
-    global app_config
-    app_config = config.load_config(config_path)
-    
+
+    # Load current overrides for providers
+    overrides = await db.get_all_config_overrides()
+    if "providers" in overrides:
+        providers = json.loads(overrides["providers"])
+    else:
+        providers = dict(app_config.get("providers", {}))
+
+    if provider_name not in providers:
+        raise HTTPException(status_code=404, detail=f"Provider '{provider_name}' not found in config")
+
+    del providers[provider_name]
+    await db.set_config_override("providers", json.dumps(providers, ensure_ascii=False))
+    await _reload_config()
     return {"message": f"Provider {provider_name} deleted"}
 
 
 @app.delete("/api/models/{model_name}")
 async def delete_model(model_name: str, admin: dict = Depends(verify_admin)):
-    """Delete a model from config."""
-    new_config = app_config.copy()
-    if "models" in new_config and model_name in new_config["models"]:
-        del new_config["models"][model_name]
-    
-    import yaml
-    config_path = os.getenv("GATEWAY_CONFIG", "config.yaml")
-    with open(config_path, "w") as f:
-        yaml.dump(new_config, f, default_flow_style=False, sort_keys=False)
-    
-    global app_config
-    app_config = config.load_config(config_path)
-    
+    """Delete a model from config overrides."""
+    # Load current overrides for models
+    overrides = await db.get_all_config_overrides()
+    if "models" in overrides:
+        models = json.loads(overrides["models"])
+    else:
+        models = dict(app_config.get("models", {}))
+
+    if model_name not in models:
+        raise HTTPException(status_code=404, detail=f"Model '{model_name}' not found in config")
+
+    del models[model_name]
+    await db.set_config_override("models", json.dumps(models, ensure_ascii=False))
+    await _reload_config()
     return {"message": f"Model {model_name} deleted"}
 
 

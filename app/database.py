@@ -24,7 +24,7 @@ from app import config
 # ---------------------------------------------------------------------------
 
 # Current schema version — bump when adding migrations.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _CREATE_SCHEMA_META = """
 CREATE TABLE IF NOT EXISTS _schema_meta (
@@ -102,11 +102,17 @@ _MIGRATIONS: dict[int, list[str]] = {
         "CREATE INDEX IF NOT EXISTS idx_daily_usage_date ON daily_usage(date);",
         "CREATE INDEX IF NOT EXISTS idx_daily_usage_key ON daily_usage(virtual_key_id);",
     ],
-    # --- Example: how to add v2 ---
-    # 2: [
-    #     "ALTER TABLE requests ADD COLUMN finish_reason TEXT;",
-    #     "CREATE INDEX IF NOT EXISTS idx_requests_finish_reason ON requests(finish_reason);",
-    # ],
+    # v2: config_overrides — persist model/provider overrides in DB
+    #     (avoids writing to read-only config.yaml in Docker).
+    2: [
+        """
+        CREATE TABLE IF NOT EXISTS config_overrides (
+            key       TEXT PRIMARY KEY,
+            value     TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+        );
+        """,
+    ],
 }
 
 
@@ -621,6 +627,59 @@ class Database:
         if limit is None:
             return True
         return row["tokens_used"] < limit
+
+    # -- config overrides ----------------------------------------------------
+
+    async def get_config_override(self, key: str) -> str | None:
+        """Get a single config override value by key."""
+        async with self.db.execute(
+            "SELECT value FROM config_overrides WHERE key = ?", (key,)
+        ) as cur:
+            row = await cur.fetchone()
+        return row["value"] if row else None
+
+    async def get_all_config_overrides(self) -> dict[str, str]:
+        """Return all config overrides as {key: value} dict."""
+        async with self.db.execute(
+            "SELECT key, value FROM config_overrides ORDER BY key"
+        ) as cur:
+            rows = await cur.fetchall()
+        return {row["key"]: row["value"] for row in rows}
+
+    async def set_config_override(self, key: str, value: str) -> None:
+        """Upsert a config override."""
+        now = datetime.now(timezone.utc).isoformat()
+        await self.db.execute(
+            """
+            INSERT INTO config_overrides (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            (key, value, now),
+        )
+        await self.db.commit()
+
+    async def delete_config_override(self, key: str) -> bool:
+        """Delete a config override. Returns True if a row was deleted."""
+        cursor = await self.db.execute(
+            "DELETE FROM config_overrides WHERE key = ?", (key,)
+        )
+        await self.db.commit()
+        return cursor.rowcount > 0
+
+    async def set_config_overrides_bulk(self, overrides: dict[str, str]) -> None:
+        """Set multiple config overrides in a single transaction."""
+        now = datetime.now(timezone.utc).isoformat()
+        for key, value in overrides.items():
+            await self.db.execute(
+                """
+                INSERT INTO config_overrides (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+                """,
+                (key, value, now),
+            )
+        await self.db.commit()
 
     # -- maintenance ---------------------------------------------------------
 

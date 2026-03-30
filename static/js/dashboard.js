@@ -576,46 +576,39 @@ function gateway() {
         // Model Management Functions
         async loadModels() {
             try {
-                const r = await this.apiFetch('/api/config');
-                if (r.ok) {
-                    const config = await r.json();
+                const [configResp, providersResp] = await Promise.all([
+                    this.apiFetch('/api/config'),
+                    this.apiFetch('/api/providers'),
+                ]);
+                
+                if (configResp.ok) {
+                    const config = await configResp.json();
                     
-                    // Build providers list
-                    const builtInProviders = Object.keys({
-                        'openai': 'https://api.openai.com/v1',
-                        'anthropic': 'https://api.anthropic.com',
-                        'gemini': 'https://generativelanguage.googleapis.com/v1beta',
-                        'openrouter': 'https://openrouter.ai/api/v1',
-                        'groq': 'https://api.groq.com/openai/v1',
-                        'together': 'https://api.together.xyz/v1',
-                        'deepseek': 'https://api.deepseek.com/v1',
-                        'mistral': 'https://api.mistral.ai/v1',
-                        'xai': 'https://api.x.ai/v1',
-                        'fireworks': 'https://api.fireworks.ai/inference/v1',
-                        'perplexity': 'https://api.perplexity.ai',
-                    });
+                    // Build providers list from server-provided info (includes built-in + custom)
+                    let serverProviders = [];
+                    if (providersResp.ok) {
+                        serverProviders = (await providersResp.json()).providers || [];
+                    }
                     
-                    this.providersList = [...builtInProviders, ...Object.keys(config.providers || {})].filter((v, i, a) => a.indexOf(v) === i).map(name => {
-                        const providerConfig = config.providers?.[name] || {};
-                        return {
-                            name: name,
-                            base_url: providerConfig?.base_url || '',
-                            has_key: !!providerConfig?.api_key,
-                            is_built_in: builtInProviders.includes(name),
-                        };
-                    });
+                    this.providersList = serverProviders.map(p => ({
+                        name: p.name,
+                        base_url: p.base_url || '',
+                        has_key: p.has_api_key,
+                        is_built_in: p.is_built_in,
+                        is_configured: p.is_configured,
+                    }));
                     
                     this.availableProviders = this.providersList.map(p => p.name);
                     
                     // Build models list
-                    this.modelsList = Object.entries(config.models || {}).map(([name, config]) => {
-                        if (typeof config === 'string') {
-                            return { name: name, provider: config, base_url: '' };
+                    this.modelsList = Object.entries(config.models || {}).map(([name, cfg]) => {
+                        if (typeof cfg === 'string') {
+                            return { name: name, provider: cfg, base_url: '' };
                         }
                         return {
                             name: name,
-                            provider: config?.provider || '',
-                            base_url: config?.base_url || '',
+                            provider: cfg?.provider || '',
+                            base_url: cfg?.base_url || '',
                         };
                     });
                 }
