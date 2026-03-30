@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, Request, HTTPException, Depends
-from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
+from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.cors import CORSMiddleware
@@ -372,6 +372,13 @@ async def list_models():
 @app.get("/health")
 async def health():
     return {"status": "ok", "version": "0.1.0"}
+
+
+@app.get("/metrics")
+async def prometheus_metrics():
+    """Prometheus-compatible metrics endpoint (no auth required)."""
+    text = await db.get_prometheus_metrics()
+    return Response(content=text, media_type="text/plain; version=0.0.4; charset=utf-8")
 
 
 @app.get("/api/health/providers")
