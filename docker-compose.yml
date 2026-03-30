@@ -9,7 +9,8 @@ services:
       - llm-gateway-data:/data
       - ./config.yaml:/app/config.yaml:ro
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       - GATEWAY_DB=/data/gateway.db
       - GATEWAY_ADMIN_KEY=${GATEWAY_ADMIN_KEY:-sk-admin-change-me}
