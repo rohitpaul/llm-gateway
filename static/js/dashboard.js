@@ -547,13 +547,14 @@ function gateway() {
 
         formatTime(iso) {
             if (!iso) return '';
-            const d = new Date(iso + (iso.includes('Z') || iso.includes('+') ? '' : 'Z'));
+            // Server stores UTC timestamps without Z — append it
+            const d = new Date(iso.includes('Z') || iso.includes('+') ? iso : iso + 'Z');
             const now = new Date();
             const diff = now - d;
             if (diff < 60000) return 'just now';
             if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
             if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
-            return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            return d.toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
         },
     };
 }
