@@ -1,0 +1,174 @@
+   <!-- Models Tab -->
+    <div x-show="tab==='models'" x-cloak class="fade-in">
+        <!-- Providers Section -->
+        <div class="mb-8">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-gray-200">Providers</h2>
+                <button @click="showAddProvider()"
+                        class="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 rounded transition">
+                    + Add Provider
+                </button>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <template x-for="provider in providersList" :key="provider.name">
+                    <div class="bg-gray-900 rounded-lg border border-gray-800 p-4">
+                        <div class="flex items-start justify-between mb-2">
+                            <div class="flex items-center gap-2">
+                                <div class="w-8 h-8 rounded bg-gray-800 flex items-center justify-center text-xs font-mono text-gray-400"
+                                     x-text="provider.name.substring(0,2).toUpperCase()"></div>
+                                <div>
+                                    <h3 class="font-medium text-sm capitalize" x-text="provider.name"></h3>
+                                    <p class="text-xs text-gray-500 font-mono truncate max-w-[200px]" x-text="provider.base_url"></p>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <span x-show="provider.has_key" class="w-2 h-2 rounded-full bg-green-500" title="API key configured"></span>
+                                <span x-show="!provider.has_key" class="w-2 h-2 rounded-full bg-gray-600" title="No API key"></span>
+                            </div>
+                        </div>
+                        <div class="flex gap-2 mt-3">
+                            <button @click="editProvider(provider.name)"
+                                    class="flex-1 px-2 py-1 text-xs bg-gray-800 hover:bg-gray-700 rounded transition">
+                                Edit
+                            </button>
+                            <button @click="deleteProvider(provider.name)"
+                                    :disabled="provider.is_built_in"
+                                    class="px-2 py-1 text-xs bg-red-900/50 hover:bg-red-900/70 rounded transition disabled:opacity-30 disabled:cursor-not-allowed">
+                                Delete
+                            </button>
+                        </div>
+                    </div>
+                </template>
+            </div>
+            <div x-show="providersList.length === 0" class="text-gray-500 text-sm text-center py-8">
+                No providers configured. Add your first provider to get started!
+            </div>
+        </div>
+
+        <!-- Models Section -->
+        <div>
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-gray-200">Models</h2>
+                <button @click="showAddModel()"
+                        class="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 rounded transition">
+                    + Add Model
+                </button>
+            </div>
+            
+            <div class="bg-gray-900 rounded-lg border border-gray-800 overflow-hidden">
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-800/50 text-gray-400 text-xs uppercase">
+                        <tr>
+                            <th class="px-4 py-3 text-left">Model Name</th>
+                            <th class="px-4 py-3 text-left hide-mobile">Provider</th>
+                            <th class="px-4 py-3 text-left hide-mobile">Base URL</th>
+                            <th class="px-4 py-3 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-800">
+                        <template x-for="model in modelsList" :key="model.name">
+                            <tr class="hover:bg-gray-800/30">
+                                <td class="px-4 py-2.5 font-mono text-xs" x-text="model.name"></td>
+                                <td class="px-4 py-2.5 capitalize text-gray-400 hide-mobile" x-text="model.provider"></td>
+                                <td class="px-4 py-2.5 text-gray-500 font-mono text-xs hide-mobile truncate max-w-[200px]" x-text="model.base_url"></td>
+                                <td class="px-4 py-2.5 text-right">
+                                    <div class="flex items-center justify-end gap-2">
+                                        <button @click="editModel(model.name)"
+                                                class="px-2 py-1 text-xs bg-gray-800 hover:bg-gray-700 rounded transition">
+                                            Edit
+                                        </button>
+                                        <button @click="deleteModel(model.name)"
+                                                class="px-2 py-1 text-xs bg-red-900/50 hover:bg-red-900/70 rounded transition">
+                                            Delete
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+                <div x-show="modelsList.length === 0" class="text-gray-500 text-sm text-center py-8">
+                    No custom models configured. Add models to override provider routing!
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Provider Modal -->
+    <div x-show="showProviderModal" x-cloak class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50"
+         @click.self="showProviderModal = false">
+        <div class="bg-gray-900 rounded-lg border border-gray-800 w-full max-w-md">
+            <div class="p-4 border-b border-gray-800">
+                <h3 class="font-semibold" x-text="editingProviderName ? 'Edit Provider' : 'Add Provider'"></h3>
+            </div>
+            <div class="p-4 space-y-4">
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Provider Name</label>
+                    <input type="text" x-model="providerForm.name" 
+                           class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 font-mono"
+                           placeholder="e.g., llama-swap">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Base URL</label>
+                    <input type="text" x-model="providerForm.base_url" 
+                           class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 font-mono"
+                           placeholder="e.g., http://localhost:8080/v1">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">API Key (optional)</label>
+                    <input type="password" x-model="providerForm.api_key" 
+                           class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 font-mono"
+                           placeholder="API key (or set via env var)">
+                    <p class="text-xs text-gray-500 mt-1">Leave empty to use environment variable</p>
+                </div>
+            </div>
+            <div class="p-4 border-t border-gray-800 flex gap-2 justify-end">
+                <button @click="showProviderModal = false"
+                        class="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 rounded transition">
+                    Cancel
+                </button>
+                <button @click="saveProvider()"
+                        class="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 rounded transition">
+                    Save
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Model Modal -->
+    <div x-show="showModelModal" x-cloak class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50"
+         @click.self="showModelModal = false">
+        <div class="bg-gray-900 rounded-lg border border-gray-800 w-full max-w-md">
+            <div class="p-4 border-b border-gray-800">
+                <h3 class="font-semibold" x-text="editingModelName ? 'Edit Model' : 'Add Model'"></h3>
+            </div>
+            <div class="p-4 space-y-4">
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Model Name</label>
+                    <input type="text" x-model="modelForm.name" 
+                           class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 font-mono"
+                           placeholder="e.g., Qwen3.5-27B">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Provider</label>
+                    <select x-model="modelForm.provider" 
+                            class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 capitalize">
+                        <template x-for="p in availableProviders" :key="p">
+                            <option :value="p" x-text="p"></option>
+                        </template>
+                    </select>
+                </div>
+            </div>
+            <div class="p-4 border-t border-gray-800 flex gap-2 justify-end">
+                <button @click="showModelModal = false"
+                        class="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 rounded transition">
+                    Cancel
+                </button>
+                <button @click="saveModel()"
+                        class="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 rounded transition">
+                    Save
+                </button>
+            </div>
+        </div>
+    </div>

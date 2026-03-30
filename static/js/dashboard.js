@@ -12,6 +12,19 @@ function gateway() {
         newKey: { name: '', provider_filter: '', model_filter: '', token_limit: '' },
         createdKey: null,
 
+        // Model management
+        modelsList: [],
+        providersList: [],
+        availableProviders: [],
+        showProviderModal: false,
+        showModelModal: false,
+        showAddProviderModal: false,
+        showAddModelModal: false,
+        editingProviderName: null,
+        editingModelName: null,
+        providerForm: { name: '', base_url: '', api_key: '' },
+        modelForm: { name: '', provider: '' },
+
         // Request detail modal
         requestDetail: null,
         detailBodyTab: 'request',
@@ -141,6 +154,9 @@ function gateway() {
             promises.push(this.loadDailyStats());
             if (Object.keys(this.providerHealth).length === 0) {
                 promises.push(this.checkProviderHealth());
+            }
+            if (this.tab === 'models') {
+                promises.push(this.loadModels());
             }
             await Promise.all(promises);
         },
@@ -555,6 +571,185 @@ function gateway() {
             if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
             if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
             return d.toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+        },
+
+        // Model Management Functions
+        async loadModels() {
+            try {
+                const r = await this.apiFetch('/api/config');
+                if (r.ok) {
+                    const config = await r.json();
+                    
+                    // Build providers list
+                    const builtInProviders = Object.keys({
+                        'openai': 'https://api.openai.com/v1',
+                        'anthropic': 'https://api.anthropic.com',
+                        'gemini': 'https://generativelanguage.googleapis.com/v1beta',
+                        'openrouter': 'https://openrouter.ai/api/v1',
+                        'groq': 'https://api.groq.com/openai/v1',
+                        'together': 'https://api.together.xyz/v1',
+                        'deepseek': 'https://api.deepseek.com/v1',
+                        'mistral': 'https://api.mistral.ai/v1',
+                        'xai': 'https://api.x.ai/v1',
+                        'fireworks': 'https://api.fireworks.ai/inference/v1',
+                        'perplexity': 'https://api.perplexity.ai',
+                    });
+                    
+                    this.providersList = [...builtInProviders, ...Object.keys(config.providers || {})].filter((v, i, a) => a.indexOf(v) === i).map(name => {
+                        const providerConfig = config.providers?.[name] || {};
+                        return {
+                            name: name,
+                            base_url: providerConfig?.base_url || '',
+                            has_key: !!providerConfig?.api_key,
+                            is_built_in: builtInProviders.includes(name),
+                        };
+                    });
+                    
+                    this.availableProviders = this.providersList.map(p => p.name);
+                    
+                    // Build models list
+                    this.modelsList = Object.entries(config.models || {}).map(([name, config]) => {
+                        if (typeof config === 'string') {
+                            return { name: name, provider: config, base_url: '' };
+                        }
+                        return {
+                            name: name,
+                            provider: config?.provider || '',
+                            base_url: config?.base_url || '',
+                        };
+                    });
+                }
+            } catch {}
+        },
+
+        resetProviderForm() {
+            this.providerForm = { name: '', base_url: '', api_key: '' };
+            this.editingProviderName = null;
+        },
+
+        resetModelForm() {
+            this.modelForm = { name: '', provider: '' };
+            this.editingModelName = null;
+        },
+
+        showAddProvider() {
+            this.resetProviderForm();
+            this.showAddProviderModal = false;
+            this.showProviderModal = true;
+        },
+
+        showAddModel() {
+            this.resetModelForm();
+            this.showAddModelModal = false;
+            this.showModelModal = true;
+        },
+
+        editProvider(name) {
+            this.resetProviderForm();
+            this.editingProviderName = name;
+            this.showProviderModal = true;
+            // Load current config
+            fetch('/api/config', { headers: { 'Authorization': 'Bearer ' + this.adminKey } })
+                .then(r => r.json())
+                .then(config => {
+                    const provider = config.providers?.[name] || {};
+                    this.providerForm = {
+                        name: name,
+                        base_url: provider?.base_url || '',
+                        api_key: provider?.api_key || '',
+                    };
+                });
+        },
+
+        editModel(name) {
+            this.resetModelForm();
+            this.editingModelName = name;
+            this.showModelModal = true;
+            // Find model in current list
+            const model = this.modelsList.find(m => m.name === name);
+            if (model) {
+                this.modelForm = { name: model.name, provider: model.provider };
+            }
+        },
+
+        async saveProvider() {
+            if (!this.providerForm.name || !this.providerForm.base_url) {
+                alert('Provider name and base URL are required');
+                return;
+            }
+
+            try {
+                // Get current config
+                const r = await fetch('/api/config', { headers: { 'Authorization': 'Bearer ' + this.adminKey } });
+                const config = await r.json();
+                
+                // Update providers
+                if (!config.providers) config.providers = {};
+                const providerConfig = { base_url: this.providerForm.base_url };
+                if (this.providerForm.api_key) {
+                    providerConfig.api_key = this.providerForm.api_key;
+                }
+                config.providers[this.providerForm.name] = providerConfig;
+                
+                // Save
+                await this.apiFetch('/api/config', {
+                    method: 'POST',
+                    body: JSON.stringify(config),
+                });
+                
+                this.showProviderModal = false;
+                await this.loadModels();
+            } catch (e) {
+                alert('Failed to save provider: ' + e.message);
+            }
+        },
+
+        async saveModel() {
+            if (!this.modelForm.name || !this.modelForm.provider) {
+                alert('Model name and provider are required');
+                return;
+            }
+
+            try {
+                // Get current config
+                const r = await fetch('/api/config', { headers: { 'Authorization': 'Bearer ' + this.adminKey } });
+                const config = await r.json();
+                
+                // Update models
+                if (!config.models) config.models = {};
+                config.models[this.modelForm.name] = { provider: this.modelForm.provider };
+                
+                // Save
+                await this.apiFetch('/api/config', {
+                    method: 'POST',
+                    body: JSON.stringify(config),
+                });
+                
+                this.showModelModal = false;
+                await this.loadModels();
+            } catch (e) {
+                alert('Failed to save model: ' + e.message);
+            }
+        },
+
+        async deleteProvider(name) {
+            if (!confirm(`Delete provider "${name}"? This will remove its custom configuration.`)) return;
+            try {
+                await this.apiFetch(`/api/providers/${encodeURIComponent(name)}`, { method: 'DELETE' });
+                await this.loadModels();
+            } catch (e) {
+                alert('Failed to delete provider: ' + e.message);
+            }
+        },
+
+        async deleteModel(name) {
+            if (!confirm(`Delete model "${name}"? This will remove its custom routing.`)) return;
+            try {
+                await this.apiFetch(`/api/models/${encodeURIComponent(name)}`, { method: 'DELETE' });
+                await this.loadModels();
+            } catch (e) {
+                alert('Failed to delete model: ' + e.message);
+            }
         },
     };
 }

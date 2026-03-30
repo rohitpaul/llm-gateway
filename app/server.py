@@ -502,6 +502,79 @@ async def get_request(request_id: int, admin: dict = Depends(verify_admin)):
 
 
 # ---------------------------------------------------------------------------
+# Model Management API
+# ---------------------------------------------------------------------------
+
+@app.get("/api/config")
+async def get_config(admin: dict = Depends(verify_admin)):
+    """Get current config (models and providers)."""
+    return {
+        "models": app_config.get("models", {}),
+        "providers": app_config.get("providers", {}),
+    }
+
+
+@app.post("/api/config")
+async def update_config(data: dict, admin: dict = Depends(verify_admin)):
+    """Update config (models and providers)."""
+    import yaml
+    
+    new_config = {
+        "models": data.get("models", {}),
+        "providers": data.get("providers", {}),
+    }
+    
+    config_path = os.getenv("GATEWAY_CONFIG", "config.yaml")
+    with open(config_path, "w") as f:
+        yaml.dump(new_config, f, default_flow_style=False, sort_keys=False)
+    
+    # Reload config
+    global app_config
+    app_config = config.load_config(config_path)
+    
+    return {"message": "Config updated successfully"}
+
+
+@app.delete("/api/providers/{provider_name}")
+async def delete_provider(provider_name: str, admin: dict = Depends(verify_admin)):
+    """Delete a provider from config."""
+    if provider_name in config.PROVIDER_BASE_URLS:
+        raise HTTPException(status_code=400, detail="Cannot delete built-in provider")
+    
+    new_config = app_config.copy()
+    if "providers" in new_config and provider_name in new_config["providers"]:
+        del new_config["providers"][provider_name]
+    
+    import yaml
+    config_path = os.getenv("GATEWAY_CONFIG", "config.yaml")
+    with open(config_path, "w") as f:
+        yaml.dump(new_config, f, default_flow_style=False, sort_keys=False)
+    
+    global app_config
+    app_config = config.load_config(config_path)
+    
+    return {"message": f"Provider {provider_name} deleted"}
+
+
+@app.delete("/api/models/{model_name}")
+async def delete_model(model_name: str, admin: dict = Depends(verify_admin)):
+    """Delete a model from config."""
+    new_config = app_config.copy()
+    if "models" in new_config and model_name in new_config["models"]:
+        del new_config["models"][model_name]
+    
+    import yaml
+    config_path = os.getenv("GATEWAY_CONFIG", "config.yaml")
+    with open(config_path, "w") as f:
+        yaml.dump(new_config, f, default_flow_style=False, sort_keys=False)
+    
+    global app_config
+    app_config = config.load_config(config_path)
+    
+    return {"message": f"Model {model_name} deleted"}
+
+
+# ---------------------------------------------------------------------------
 # Dashboard (HTML)
 # ---------------------------------------------------------------------------
 
