@@ -229,6 +229,18 @@ async def lifespan(app: FastAPI):
     global app_config
     await db.connect()
     app_config = await _apply_db_overrides(config.load_config())
+    
+    # Purge old data on startup
+    retention_days = config.DEFAULT_RETENTION_DAYS
+    if retention_days > 0:
+        deleted = await db.purge_old_data(retention_days)
+        if any(deleted.values()):
+            print(f"✓ Purged old data (retention: {retention_days} days):")
+            print(f"  - {deleted['requests']} requests")
+            print(f"  - {deleted['daily_usage']} daily_usage records")
+            if deleted['model_stats'] > 0:
+                print(f"  - {deleted['model_stats']} model_stats records")
+    
     print(f"✓ LLM Gateway started — {config.DEFAULT_HOST}:{config.DEFAULT_PORT}")
     print(f"  Dashboard: http://{config.DEFAULT_HOST}:{config.DEFAULT_PORT}/")
     yield

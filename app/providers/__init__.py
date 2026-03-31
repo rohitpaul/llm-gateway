@@ -268,7 +268,7 @@ async def _handle_stream(
                             
                             # Calculate TPS: output tokens / generation duration in seconds
                             end_time = time.monotonic()
-                            out_tokens=usage_...ns"]
+                            out_tokens = usage_data["output_tokens"]
                             if first_token_time is not None and out_tokens > 0 and tps is None:
                                 gen_duration_s = (end_time - first_token_time)
                                 tps = out_tokens / gen_duration_s if gen_duration_s > 0 else None
@@ -320,15 +320,15 @@ async def _handle_stream(
                                     if timings:
                                         usage_data["input_tokens"] = timings.get("prompt_n", 0)
                                         usage_data["output_tokens"] = timings.get("predicted_n", 0)
-                       # Detect first content token for OpenAI-compatible
-                        if first_token_time is None:
-                            choices = parsed.get("choices", [])
-                            if choices:
-                                delta = choices[0].get("delta", {})
-                                content = delta.get("content")
-                                # First token: any chunk with content (regardless of role field)
-                                if content is not None and len(str(content)) > 0:
-                                    first_token_time=time.monotonic()
+                                # Detect first content token for OpenAI-compatible
+                                if first_token_time is None:
+                                    choices = parsed.get("choices", [])
+                                    if choices:
+                                        delta = choices[0].get("delta", {})
+                                        content = delta.get("content")
+                                        # First token: any chunk with content (regardless of role field)
+                                        if content is not None and len(str(content)) > 0:
+                                            first_token_time = time.monotonic()
                         except (json.JSONDecodeError, KeyError, TypeError):
                             pass
                     yield (line + "\n\n").encode()

@@ -884,3 +884,44 @@ class Database:
         )
         await self.db.commit()
         return cursor.rowcount
+
+    async def purge_old_data(self, retention_days: int = 7) -> dict[str, int]:
+        """Delete all data older than retention_days.
+
+        Removes:
+        - requests older than retention_days
+        - daily_usage entries older than retention_days
+        - model_stats entries older than retention_days
+
+        Returns a dict with counts of deleted records.
+        """
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=retention_days)
+        ).isoformat()
+
+        deleted = {"requests": 0, "daily_usage": 0, "model_stats": 0}
+
+        # Delete old requests
+        async with self.db.execute(
+            "DELETE FROM requests WHERE created_at < ?", (cutoff,)
+        ) as cursor:
+            deleted["requests"] = cursor.rowcount
+
+        # Delete old daily_usage
+        async with self.db.execute(
+            "DELETE FROM daily_usage WHERE date < ?", (cutoff[:10],)
+        ) as cursor:
+            deleted["daily_usage"] = cursor.rowcount
+
+        # Delete old model_stats (if table exists)
+        try:
+            async with self.db.execute(
+                "DELETE FROM model_stats WHERE date < ?", (cutoff[:10],)
+            ) as cursor:
+                deleted["model_stats"] = cursor.rowcount
+        except sqlite3.OperationalError:
+            # model_stats table may not exist in older schemas
+            deleted["model_stats"] = 0
+
+        await self.db.commit()
+        return deleted

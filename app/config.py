@@ -12,6 +12,7 @@ DEFAULT_CONFIG_PATH = os.getenv("GATEWAY_CONFIG", "config.yaml")
 DEFAULT_DB_PATH = os.getenv("GATEWAY_DB", "data/gateway.db")
 DEFAULT_HOST = os.getenv("GATEWAY_HOST", "0.0.0.0")
 DEFAULT_PORT = int(os.getenv("GATEWAY_PORT", "4000"))
+DEFAULT_RETENTION_DAYS = int(os.getenv("GATEWAY_RETENTION_DAYS", "7"))  # Default 7 days
 _raw_admin_key = os.getenv("GATEWAY_ADMIN_KEY")
 if not _raw_admin_key:
     raise SystemExit("FATAL: GATEWAY_ADMIN_KEY environment variable is required. Set it in .env or docker-compose.yml.")
