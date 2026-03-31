@@ -153,9 +153,13 @@ function gateway() {
                 this.loadKeys(),
             ];
             promises.push(this.loadDailyStats());
+            
+            // Only check provider health if we haven't done it recently
+            // Don't wait for it when loading models tab - let it run in background
             if (Object.keys(this.providerHealth).length === 0) {
-                promises.push(this.checkProviderHealth());
+                this.checkProviderHealth().catch(() => {});
             }
+            
             if (this.tab === 'models') {
                 promises.push(this.loadModels());
             }

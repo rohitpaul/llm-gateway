@@ -438,7 +438,7 @@ async def health_providers(admin: dict = Depends(verify_admin)):
         import time as _time
         start = _time.monotonic()
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=2.0) as client:
                 resp = await client.get(check_url, headers=headers)
                 latency_ms = (_time.monotonic() - start) * 1000
                 if resp.status_code < 500:
