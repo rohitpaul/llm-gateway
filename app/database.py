@@ -676,7 +676,7 @@ class Database:
 
         # Get error breakdown
         async with self.db.execute(
-            f"""
+            """
             SELECT 
                 CASE 
                     WHEN error_message LIKE '%401%' THEN 'Authentication'
@@ -688,8 +688,9 @@ class Database:
                 END as error_type,
                 COUNT(*) as count
             FROM requests 
-            {where}
-            AND status = 'error'
+            WHERE status = 'error'
+            """ + (" AND " + " AND ".join(conditions) if conditions else "") +
+            """
             GROUP BY error_type
             ORDER BY count DESC
             """,
