@@ -87,13 +87,27 @@ def calculate_cost(
         model_routes = config.get("models", {})
         if model in model_routes:
             model_config = model_routes[model]
-            if isinstance(model_config, dict) and "pricing" in model_config:
-                prices = model_config["pricing"]
-                input_price = prices.get("input", 0) / 1_000_000
-                output_price = prices.get("output", 0) / 1_000_000
-                cache_price = prices.get("cache_read", prices.get("input", 0) * 0.5) / 1_000_000
-                regular_input = max(0, input_tokens - cache_read_tokens)
-                return (regular_input * input_price) + (cache_read_tokens * cache_price) + (output_tokens * output_price)
+            if isinstance(model_config, dict):
+                # Support both nested pricing format and flat format (from UI)
+                prices = None
+                
+                # Check for nested pricing format (from config.yaml)
+                if "pricing" in model_config:
+                    prices = model_config["pricing"]
+                # Check for flat format (from UI)
+                elif "input" in model_config or "output" in model_config:
+                    prices = {
+                        "input": model_config.get("input", 0),
+                        "output": model_config.get("output", 0),
+                        "cache_read": model_config.get("cache_read", 0),
+                    }
+                
+                if prices:
+                    input_price = prices.get("input", 0) / 1_000_000
+                    output_price = prices.get("output", 0) / 1_000_000
+                    cache_price = prices.get("cache_read", prices.get("input", 0) * 0.5) / 1_000_000
+                    regular_input = max(0, input_tokens - cache_read_tokens)
+                    return (regular_input * input_price) + (cache_read_tokens * cache_price) + (output_tokens * output_price)
     
     # Fall back to default pricing
     prices = PRICING.get(model, {"input": 0, "output": 0})
