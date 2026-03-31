@@ -639,6 +639,13 @@ async def get_request(request_id: int, admin: dict = Depends(verify_admin)):
     return row
 
 
+@app.delete("/api/stats/reset")
+async def reset_stats(admin: dict = Depends(verify_admin)):
+    """Reset all statistics (clear requests and daily_usage tables)."""
+    await db.reset_stats()
+    return {"message": "Statistics reset successfully"}
+
+
 # ---------------------------------------------------------------------------
 # Model Management API
 # ---------------------------------------------------------------------------

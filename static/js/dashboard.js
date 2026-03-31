@@ -45,6 +45,9 @@ function gateway() {
         // Performance metrics
         percentiles: { p50: null, p90: null, p95: null, p99: null },
         errorStats: { total_requests: 0, successful_requests: 0, failed_requests: 0, error_rate: 0, errors_by_type: {} },
+        
+        // Stats reset
+        statsResetting: false,
 
         // Auth state
         authenticated: false,
@@ -210,6 +213,31 @@ function gateway() {
                 if (r.ok) this.providerHealth = (await r.json()).providers || {};
             } catch {}
             this.providerHealthLoading = false;
+        },
+
+        confirmResetStats() {
+            if (confirm('Are you sure you want to reset all statistics? This will delete all request history and cannot be undone.')) {
+                this.resetStats();
+            }
+        },
+
+        async resetStats() {
+            this.statsResetting = true;
+            try {
+                const r = await this.apiFetch('/api/stats/reset', { method: 'DELETE' });
+                if (r.ok) {
+                    alert('Statistics reset successfully');
+                    // Reload the page to refresh all stats
+                    window.location.reload();
+                } else {
+                    const err = await r.json();
+                    alert('Failed to reset stats: ' + (err.detail || 'Unknown error'));
+                }
+            } catch (e) {
+                alert('Failed to reset stats: ' + e.message);
+            } finally {
+                this.statsResetting = false;
+            }
         },
 
         async loadChartData() {

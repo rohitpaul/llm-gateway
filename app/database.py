@@ -446,6 +446,12 @@ class Database:
             row = await cur.fetchone()
         return _row_to_dict(row)
 
+    async def reset_stats(self) -> None:
+        """Reset all statistics by clearing requests and daily_usage tables."""
+        await self.db.execute("DELETE FROM daily_usage")
+        await self.db.execute("DELETE FROM requests")
+        await self.db.commit()
+
     # -- daily / aggregated stats -------------------------------------------
 
     async def get_daily_stats(
