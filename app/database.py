@@ -542,12 +542,13 @@ class Database:
         if conditions:
             where = "WHERE " + " AND ".join(conditions)
 
+        # Get base stats from daily_usage
         sql = f"""
             SELECT model,
-                   SUM(request_count)  AS request_count,
-                   SUM(input_tokens)   AS input_tokens,
-                   SUM(output_tokens)  AS output_tokens,
-                   SUM(cost)           AS cost
+                   SUM(request_count)        AS request_count,
+                   SUM(input_tokens)         AS input_tokens,
+                   SUM(output_tokens)        AS output_tokens,
+                   SUM(cost)                 AS cost
             FROM daily_usage
             {where}
             GROUP BY model
@@ -555,7 +556,40 @@ class Database:
         """
         async with self.db.execute(sql, params) as cur:
             rows = await cur.fetchall()
-        return _rows_to_dicts(rows)
+        
+        stats = _rows_to_dicts(rows)
+        
+        # Calculate avg_tps from requests table
+        tps_conditions = []
+        tps_params = []
+        if date_from is not None:
+            tps_conditions.append("created_at >= ?")
+            tps_params.append(date_from)
+        if date_to is not None:
+            tps_conditions.append("created_at <= ?")
+            tps_params.append(date_to)
+        
+        tps_where = ""
+        if tps_conditions:
+            tps_where = "WHERE " + " AND ".join(tps_conditions)
+        
+        tps_sql = f"""
+            SELECT model, AVG(tokens_per_second) as avg_tps
+            FROM requests
+            WHERE status = 'success'
+            {tps_where}
+            GROUP BY model
+        """
+        async with self.db.execute(tps_sql, tps_params) as cur:
+            tps_rows = await cur.fetchall()
+        
+        tps_by_model = {row[0]: row[1] for row in tps_rows}
+        
+        # Merge TPS into stats
+        for stat in stats:
+            stat["avg_tps"] = tps_by_model.get(stat["model"])
+        
+        return stats
 
     async def get_provider_stats(
         self,
@@ -577,12 +611,13 @@ class Database:
         if conditions:
             where = "WHERE " + " AND ".join(conditions)
 
+        # Get base stats from daily_usage
         sql = f"""
             SELECT provider,
-                   SUM(request_count)  AS request_count,
-                   SUM(input_tokens)   AS input_tokens,
-                   SUM(output_tokens)  AS output_tokens,
-                   SUM(cost)           AS cost
+                   SUM(request_count)        AS request_count,
+                   SUM(input_tokens)         AS input_tokens,
+                   SUM(output_tokens)        AS output_tokens,
+                   SUM(cost)                 AS cost
             FROM daily_usage
             {where}
             GROUP BY provider
@@ -590,7 +625,48 @@ class Database:
         """
         async with self.db.execute(sql, params) as cur:
             rows = await cur.fetchall()
-        return _rows_to_dicts(rows)
+        
+        stats = _rows_to_dicts(rows)
+        
+        # Calculate error_rate from requests table
+        error_conditions = []
+        error_params = []
+        if date_from is not None:
+            error_conditions.append("created_at >= ?")
+            error_params.append(date_from)
+        if date_to is not None:
+            error_conditions.append("created_at <= ?")
+            error_params.append(date_to)
+        
+        error_where = ""
+        if error_conditions:
+            error_where = "WHERE " + " AND ".join(error_conditions)
+        
+        error_sql = f"""
+            SELECT provider,
+                   COUNT(*) as total,
+                   SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as errors,
+                   ROUND(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as error_rate
+            FROM requests
+            {error_where}
+            GROUP BY provider
+        """
+        async with self.db.execute(error_sql, error_params) as cur:
+            error_rows = await cur.fetchall()
+        
+        error_by_provider = {row[0]: {"error_count": row[2], "error_rate": row[3]} for row in error_rows}
+        
+        # Merge error stats into stats
+        for stat in stats:
+            provider = stat["provider"]
+            if provider in error_by_provider:
+                stat["error_count"] = error_by_provider[provider]["error_count"]
+                stat["error_rate"] = error_by_provider[provider]["error_rate"]
+            else:
+                stat["error_count"] = 0
+                stat["error_rate"] = 0.0
+        
+        return stats
 
     async def get_latency_percentiles(
         self,
