@@ -1,5 +1,15 @@
-   <!-- Models Tab -->
+     <!-- Models Tab -->
     <div x-show="tab==='models'" x-cloak class="fade-in">
+        <!-- Loading state -->
+        <div x-show="modelsLoading" class="flex items-center justify-center py-12">
+            <div class="text-center">
+                <div class="inline-block w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mb-3"></div>
+                <p class="text-gray-400 text-sm">Loading models...</p>
+            </div>
+        </div>
+        
+        <!-- Content -->
+        <div x-show="!modelsLoading">
         <!-- Providers Section -->
         <div class="mb-8">
             <div class="flex items-center justify-between mb-4">
@@ -96,6 +106,7 @@
                     No custom models configured. Add models to override provider routing!
                 </div>
             </div>
+        </div>
         </div>
     </div>
 

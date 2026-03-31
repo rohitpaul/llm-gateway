@@ -39,6 +39,7 @@ function gateway() {
         chartInstances: {},
         dailyStatsData: null,
         selectedModel: '',
+        modelsLoading: false,
 
         // Auth state
         authenticated: false,
@@ -160,7 +161,9 @@ function gateway() {
                 this.checkProviderHealth().catch(() => {});
             }
             
-            if (this.tab === 'models') {
+            // Only load models if already on models tab (initial load)
+            // Otherwise loadModelsThenSwitch() will handle it
+            if (this.tab === 'models' && this.modelsList.length === 0) {
                 promises.push(this.loadModels());
             }
             await Promise.all(promises);
@@ -598,8 +601,26 @@ function gateway() {
         },
 
         // Model Management Functions
+        async loadModelsThenSwitch() {
+            // If already on models tab and data is loaded, just switch
+            if (this.tab === 'models' && this.modelsList.length > 0) {
+                return;
+            }
+            
+            // Start loading
+            this.modelsLoading = true;
+            
+            // Load data
+            await this.loadModels();
+            
+            // Switch to models tab
+            this.tab = 'models';
+        },
+        
         async loadModels() {
             try {
+                this.modelsLoading = true;
+                
                 const [configResp, providersResp] = await Promise.all([
                     this.apiFetch('/api/config'),
                     this.apiFetch('/api/providers'),
@@ -638,7 +659,9 @@ function gateway() {
                         };
                     });
                 }
-            } catch {}
+            } catch {} finally {
+                this.modelsLoading = false;
+            }
         },
 
         resetProviderForm() {
