@@ -455,8 +455,9 @@ class Database:
         date_from: str | None = None,
         date_to: str | None = None,
         key_id: int | None = None,
+        model: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Return daily_usage rows, optionally filtered by date range and key."""
+        """Return daily_usage rows, optionally filtered by date range, key, and model."""
         conditions: list[str] = []
         params: list[Any] = []
 
@@ -469,6 +470,9 @@ class Database:
         if key_id is not None:
             conditions.append("virtual_key_id = ?")
             params.append(key_id)
+        if model is not None:
+            conditions.append("model = ?")
+            params.append(model)
 
         where = ""
         if conditions:
@@ -484,6 +488,7 @@ class Database:
         date_from: str | None = None,
         date_to: str | None = None,
         key_id: int | None = None,
+        model: str | None = None,
     ) -> list[dict[str, Any]]:
         """Aggregate requests by hour from the raw requests table."""
         conditions: list[str] = ["status = 'success'"]
@@ -498,6 +503,9 @@ class Database:
         if key_id is not None:
             conditions.append("virtual_key_id = ?")
             params.append(key_id)
+        if model is not None:
+            conditions.append("model = ?")
+            params.append(model)
 
         where = "WHERE " + " AND ".join(conditions)
         sql = f"""

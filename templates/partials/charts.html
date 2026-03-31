@@ -1,25 +1,39 @@
-    <!-- Charts Tab -->
+   <!-- Charts Tab -->
     <div x-show="tab==='charts'" x-cloak class="fade-in space-y-6">
         <div class="bg-gray-900 rounded-lg p-4 border border-gray-800">
-            <div class="flex items-center justify-between mb-4">
-                <h3 class="text-sm font-medium text-gray-300">Usage <span class="text-gray-500" x-text="chartMode === 'hourly' ? '(hourly)' : '(last ' + chartDays + ' days)'"></span></h3>
-                <div class="flex gap-1 text-xs">
-                    <!-- Hourly / Daily toggle -->
-                    <button @click="chartMode = 'hourly'; loadChartData()"
-                            :class="chartMode === 'hourly' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'"
-                            class="px-2 py-1 rounded">Hourly</button>
-                    <!-- Day ranges for daily mode -->
-                    <template x-for="d in [7, 14, 30]" :key="d">
-                        <button @click="chartMode = 'daily'; chartDays = d; loadChartData()"
-                                :class="chartMode === 'daily' && chartDays === d ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'"
-                                class="px-2 py-1 rounded" x-text="d + 'd'"></button>
-                    </template>
+            <!-- Filters -->
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <h3 class="text-sm font-medium text-gray-300">Usage Analytics</h3>
+                <div class="flex flex-wrap items-center gap-2">
+                    <!-- Model filter -->
+                    <select x-model="selectedModel" @change="loadChartData()"
+                            class="bg-gray-800 text-gray-300 text-xs rounded px-2 py-1 border border-gray-700 focus:border-blue-500 focus:outline-none">
+                        <option value="">All Models</option>
+                        <template x-for="m in modelsList" :key="m">
+                            <option :value="m" x-text="m"></option>
+                        </template>
+                    </select>
+                    <!-- Time range -->
+                    <div class="flex gap-1 text-xs">
+                        <button @click="chartMode = 'hourly'; loadChartData()"
+                                :class="chartMode === 'hourly' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'"
+                                class="px-2 py-1 rounded">Hourly</button>
+                        <template x-for="d in [7, 14, 30]" :key="d">
+                            <button @click="chartMode = 'daily'; chartDays = d; loadChartData()"
+                                    :class="chartMode === 'daily' && chartDays === d ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'"
+                                    class="px-2 py-1 rounded" x-text="d + 'd'"></button>
+                        </template>
+                    </div>
                 </div>
             </div>
+
+            <!-- Charts grid -->
             <div class="grid md:grid-cols-2 gap-4 sm:gap-6">
+                <!-- Chart 1: Token Volume -->
                 <div class="h-52 sm:h-64">
                     <div id="chartTokens"></div>
                 </div>
+                <!-- Chart 2: Cost -->
                 <div class="h-52 sm:h-64">
                     <div id="chartCost"></div>
                 </div>

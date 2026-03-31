@@ -38,6 +38,7 @@ function gateway() {
         chartDays: 7,
         chartInstances: {},
         dailyStatsData: null,
+        selectedModel: '',
 
         // Auth state
         authenticated: false,
@@ -193,12 +194,16 @@ function gateway() {
 
         async loadChartData() {
             try {
+                const params = new URLSearchParams();
+                if (this.selectedModel) params.append('model', this.selectedModel);
+                
                 if (this.chartMode === 'hourly') {
                     // Last 6 hours of hourly data
                     const from = new Date();
                     from.setHours(from.getHours() - 6);
                     const dateFrom = from.toISOString().slice(0, 10);
-                    const r = await this.apiFetch('/api/stats/hourly?date_from=' + dateFrom);
+                    params.append('date_from', dateFrom);
+                    const r = await this.apiFetch('/api/stats/hourly?' + params.toString());
                     if (!r.ok) return;
                     const hourly = (await r.json()).hourly || [];
                     this._renderChartsHourly(hourly);
@@ -206,7 +211,8 @@ function gateway() {
                     const from = new Date();
                     from.setDate(from.getDate() - this.chartDays);
                     const dateFrom = from.toISOString().slice(0, 10);
-                    const r = await this.apiFetch('/api/stats/daily?date_from=' + dateFrom);
+                    params.append('date_from', dateFrom);
+                    const r = await this.apiFetch('/api/stats/daily?' + params.toString());
                     if (!r.ok) return;
                     this.dailyStatsData = (await r.json()).daily || [];
                     this._renderChartsDaily(this.dailyStatsData);
@@ -219,7 +225,7 @@ function gateway() {
             return this.loadChartData();
         },
 
-        _renderChartsDaily(data) {
+     _renderChartsDaily(data) {
             // Aggregate by date
             const dayMap = {};
             const now = new Date();
@@ -242,7 +248,7 @@ function gateway() {
                 return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
             });
 
-            // Tokens chart — stacked bar (input/output tokens) + line (requests)
+            // Chart 1: Token Volume (stacked input/output)
             const tokEl = document.getElementById('chartTokens');
             if (tokEl) {
                 if (this.chartInstances.tokens) this.chartInstances.tokens.destroy();
@@ -259,23 +265,15 @@ function gateway() {
                     series: [
                         {
                             name: 'Input Tokens (K)',
-                            type: 'column',
                             data: dates.map(d => (dayMap[d].input_tokens || 0) / 1000),
                         },
                         {
                             name: 'Output Tokens (K)',
-                            type: 'column',
                             data: dates.map(d => (dayMap[d].output_tokens || 0) / 1000),
                         },
-                        {
-                            name: 'Requests',
-                            type: 'line',
-                            data: dates.map(d => dayMap[d].requests),
-                        },
                     ],
-                    colors: ['#3b82f6', '#a78bfa', '#34d399'],
-                    stroke: { width: [0, 0, 2], curve: 'smooth' },
-                    plotOptions: { bar: { borderRadius: 3, columnWidth: '55%' } },
+                    colors: ['#3b82f6', '#a78bfa'],
+                    plotOptions: { bar: { borderRadius: 3, columnWidth: '60%' } },
                     dataLabels: { enabled: false },
                     xaxis: {
                         categories: labels,
@@ -283,10 +281,10 @@ function gateway() {
                         axisTicks: { show: false },
                         labels: { style: { color: '#9ca3af', fontSize: '10px' } },
                     },
-                    yaxis: [
-                        { title: { text: 'Tokens (K)', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' } } },
-                        { opposite: true, title: { text: 'Requests', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' } } },
-                    ],
+                    yaxis: {
+                        title: { text: 'Tokens (K)', style: { color: '#9ca3af', fontSize: '11px' } },
+                        labels: { style: { color: '#9ca3af', fontSize: '10px' } },
+                    },
                     grid: { borderColor: 'rgba(255,255,255,0.06)', strokeDashArray: 3 },
                     legend: { labels: { colors: '#d1d5db' }, fontSize: '11px' },
                     tooltip: { theme: 'dark' },
@@ -295,13 +293,13 @@ function gateway() {
                 this.chartInstances.tokens.render();
             }
 
-            // Output tokens chart — bar (output tokens) + line (cost)
+            // Chart 2: Cost over time (line chart)
             const costEl = document.getElementById('chartCost');
             if (costEl) {
                 if (this.chartInstances.cost) this.chartInstances.cost.destroy();
                 this.chartInstances.cost = new ApexCharts(costEl, {
                     chart: {
-                        type: 'bar',
+                        type: 'area',
                         height: '100%',
                         background: 'transparent',
                         toolbar: { show: false },
@@ -310,30 +308,34 @@ function gateway() {
                     },
                     series: [
                         {
-                            name: 'Output Tokens (K)',
-                            type: 'column',
-                            data: dates.map(d => (dayMap[d].output_tokens || 0) / 1000),
-                        },
-                        {
                             name: 'Cost ($)',
-                            type: 'line',
                             data: dates.map(d => dayMap[d].cost),
                         },
                     ],
-                    colors: ['#fbbf24', '#f87171'],
-                    stroke: { width: [0, 2], curve: 'smooth' },
-                    plotOptions: { bar: { borderRadius: 3, columnWidth: '55%' } },
+                    colors: ['#f87171'],
+                    fill: {
+                        type: 'gradient',
+                        gradient: {
+                            shadeIntensity: 0.5,
+                            opacityFrom: 0.3,
+                            opacityTo: 0.05,
+                        },
+                    },
+                    stroke: { width: 2, curve: 'smooth' },
                     dataLabels: { enabled: false },
                     xaxis: {
                         categories: labels,
                         axisBorder: { show: false },
                         axisTicks: { show: false },
-                        labels: { style: { colors: '#9ca3af', fontSize: '10px' } },
+                        labels: { style: { color: '#9ca3af', fontSize: '10px' } },
                     },
-                    yaxis: [
-                        { title: { text: 'Output Tokens (K)', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' } } },
-                        { opposite: true, title: { text: 'Cost ($)', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' }, formatter: v => '$' + (v || 0).toFixed(4) } },
-                    ],
+                    yaxis: {
+                        title: { text: 'Cost ($)', style: { color: '#9ca3af', fontSize: '11px' } },
+                        labels: { 
+                            style: { color: '#9ca3af', fontSize: '10px' },
+                            formatter: v => '$' + v.toFixed(4)
+                        },
+                    },
                     grid: { borderColor: 'rgba(255,255,255,0.06)', strokeDashArray: 3 },
                     legend: { labels: { colors: '#d1d5db' }, fontSize: '11px' },
                     tooltip: { theme: 'dark' },
@@ -343,7 +345,7 @@ function gateway() {
             }
         },
 
-        _renderChartsHourly(data) {
+      _renderChartsHourly(data) {
             // Build hour map for last 6 hours
             const hourMap = {};
             const now = new Date();
@@ -383,32 +385,30 @@ function gateway() {
                 categories: labels,
                 axisBorder: { show: false },
                 axisTicks: { show: false },
-                labels: { style: { colors: '#9ca3af', fontSize: '10px' }, rotate: -45, rotateAlways: true },
+                labels: { style: { color: '#9ca3af', fontSize: '10px' }, rotate: -45, rotateAlways: true },
             };
             const baseGrid = { borderColor: 'rgba(255,255,255,0.06)', strokeDashArray: 3 };
             const baseLegend = { labels: { colors: '#d1d5db' }, fontSize: '11px' };
             const baseTheme = { mode: 'dark' };
 
-            // Tokens chart — stacked bar (input/output) + line (requests)
+            // Chart 1: Token Volume (stacked input/output)
             const tokEl = document.getElementById('chartTokens');
             if (tokEl) {
                 if (this.chartInstances.tokens) this.chartInstances.tokens.destroy();
                 this.chartInstances.tokens = new ApexCharts(tokEl, {
                     chart: { ...baseChart, type: 'bar', stacked: true },
                     series: [
-                        { name: 'Input Tokens (K)', type: 'column', data: hours.map(h => (hourMap[h].input_tokens || 0) / 1000) },
-                        { name: 'Output Tokens (K)', type: 'column', data: hours.map(h => (hourMap[h].output_tokens || 0) / 1000) },
-                        { name: 'Requests', type: 'line', data: hours.map(h => hourMap[h].requests) },
+                        { name: 'Input Tokens (K)', data: hours.map(h => (hourMap[h].input_tokens || 0) / 1000) },
+                        { name: 'Output Tokens (K)', data: hours.map(h => (hourMap[h].output_tokens || 0) / 1000) },
                     ],
-                    colors: ['#3b82f6', '#a78bfa', '#34d399'],
-                    stroke: { width: [0, 0, 2], curve: 'smooth' },
-                    plotOptions: { bar: { borderRadius: 3, columnWidth: '55%' } },
+                    colors: ['#3b82f6', '#a78bfa'],
+                    plotOptions: { bar: { borderRadius: 3, columnWidth: '60%' } },
                     dataLabels: { enabled: false },
                     xaxis: baseXaxis,
-                    yaxis: [
-                        { title: { text: 'Tokens (K)', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' } } },
-                        { opposite: true, title: { text: 'Requests', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' } } },
-                    ],
+                    yaxis: {
+                        title: { text: 'Tokens (K)', style: { color: '#9ca3af', fontSize: '11px' } },
+                        labels: { style: { color: '#9ca3af', fontSize: '10px' } },
+                    },
                     grid: baseGrid,
                     legend: baseLegend,
                     tooltip: { theme: 'dark' },
@@ -417,25 +417,34 @@ function gateway() {
                 this.chartInstances.tokens.render();
             }
 
-            // Output tokens chart — bar (output tokens) + line (cost)
+            // Chart 2: Cost over time (area chart)
             const costEl = document.getElementById('chartCost');
             if (costEl) {
                 if (this.chartInstances.cost) this.chartInstances.cost.destroy();
                 this.chartInstances.cost = new ApexCharts(costEl, {
-                    chart: { ...baseChart, type: 'bar' },
+                    chart: { ...baseChart, type: 'area' },
                     series: [
-                        { name: 'Output Tokens (K)', type: 'column', data: hours.map(h => (hourMap[h].output_tokens || 0) / 1000) },
-                        { name: 'Cost ($)', type: 'line', data: hours.map(h => hourMap[h].cost) },
+                        { name: 'Cost ($)', data: hours.map(h => hourMap[h].cost) },
                     ],
-                    colors: ['#fbbf24', '#f87171'],
-                    stroke: { width: [0, 2], curve: 'smooth' },
-                    plotOptions: { bar: { borderRadius: 3, columnWidth: '55%' } },
+                    colors: ['#f87171'],
+                    fill: {
+                        type: 'gradient',
+                        gradient: {
+                            shadeIntensity: 0.5,
+                            opacityFrom: 0.3,
+                            opacityTo: 0.05,
+                        },
+                    },
+                    stroke: { width: 2, curve: 'smooth' },
                     dataLabels: { enabled: false },
                     xaxis: baseXaxis,
-                    yaxis: [
-                        { title: { text: 'Output Tokens (K)', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' } } },
-                        { opposite: true, title: { text: 'Cost ($)', style: { color: '#9ca3af', fontSize: '11px' } }, labels: { style: { color: '#9ca3af', fontSize: '10px' }, formatter: v => '$' + (v || 0).toFixed(4) } },
-                    ],
+                    yaxis: {
+                        title: { text: 'Cost ($)', style: { color: '#9ca3af', fontSize: '11px' } },
+                        labels: { 
+                            style: { color: '#9ca3af', fontSize: '10px' },
+                            formatter: v => '$' + v.toFixed(4)
+                        },
+                    },
                     grid: baseGrid,
                     legend: baseLegend,
                     tooltip: { theme: 'dark' },
