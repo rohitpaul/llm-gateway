@@ -9,8 +9,8 @@
                     <select x-model="selectedModel" @change="loadChartData()"
                             class="bg-gray-800 text-gray-300 text-xs rounded px-2 py-1 border border-gray-700 focus:border-blue-500 focus:outline-none">
                         <option value="">All Models</option>
-                        <template x-for="m in modelsList" :key="m">
-                            <option :value="m" x-text="m"></option>
+                        <template x-for="m in modelsList" :key="m.name">
+                            <option :value="m.name" x-text="m.name"></option>
                         </template>
                     </select>
                     <!-- Time range -->

@@ -11,6 +11,7 @@ function gateway() {
         keys: [],
         newKey: { name: '', provider_filter: '', model_filter: '', token_limit: '' },
         createdKey: null,
+        _prevTab: null,
 
         // Model management
         modelsList: [],
@@ -50,7 +51,7 @@ function gateway() {
         showLoginKey: false,
         _refreshInterval: null,
 
-        async init() {
+      async init() {
             const saved = localStorage.getItem('gateway_admin_key');
             if (saved) {
                 this.adminKey = saved;
@@ -59,6 +60,12 @@ function gateway() {
                     this.authenticated = true;
                     await this.loadAll();
                     this._refreshInterval = setInterval(() => this.loadAll(), 10000);
+                    // Watch for tab changes to charts
+                    this.$watch('tab', (newTab) => {
+                        if (newTab === 'charts' && this.modelsList.length === 0) {
+                            this.loadModels().catch(() => {});
+                        }
+                    });
                     return;
                 }
                 // Saved key is invalid, clear it
@@ -161,11 +168,11 @@ function gateway() {
                 this.checkProviderHealth().catch(() => {});
             }
             
-            // Only load models if already on models tab (initial load)
-            // Otherwise loadModelsThenSwitch() will handle it
-            if (this.tab === 'models' && this.modelsList.length === 0) {
+            // Load models if needed for charts filter or if on models tab
+            if (this.modelsList.length === 0 && (this.tab === 'models' || this.tab === 'charts')) {
                 promises.push(this.loadModels());
             }
+            
             await Promise.all(promises);
         },
 
