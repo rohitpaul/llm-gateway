@@ -61,25 +61,8 @@ def calculate_cost(
     input_tokens: int,
     output_tokens: int,
     cache_read_tokens: int = 0,
-    cfg: dict | None = None,
 ) -> float:
-    """Calculate cost in USD for a request.
-
-    Per-model prices from config take precedence over the global PRICING dict.
-    Config format: models.<name> = { "input": float, "output": float, "cache_read": float }
-    All prices are per 1M tokens.
-    """
-    # Check config-based per-model pricing first
-    if cfg is not None:
-        model_cfg = cfg.get("models", {}).get(model, {})
-        if isinstance(model_cfg, dict) and ("input" in model_cfg or "output" in model_cfg):
-            input_price = model_cfg.get("input", 0) / 1_000_000
-            output_price = model_cfg.get("output", 0) / 1_000_000
-            cache_price = model_cfg.get("cache_read", model_cfg.get("input", 0) / 1_000_000 * 0.5) / 1_000_000
-            regular_input = max(0, input_tokens - cache_read_tokens)
-            return (regular_input * input_price) + (cache_read_tokens * cache_price) + (output_tokens * output_price)
-
-    # Fall back to global PRICING dict
+    """Calculate cost in USD for a request."""
     prices = PRICING.get(model, {"input": 0, "output": 0})
     input_price = prices.get("input", 0) / 1_000_000
     output_price = prices.get("output", 0) / 1_000_000
@@ -164,8 +147,11 @@ async def proxy_chat_completions(
     base_url = _get_base_url(provider, cfg)
     api_key = _get_api_key(provider, cfg)
 
-    # Build headers — local/self-hosted providers may not need API keys
-    headers = _build_headers(provider, api_key or "")
+    if not api_key:
+        raise ValueError(f"No API key configured for provider '{provider}'")
+
+    # Build headers based on provider
+    headers = _build_headers(provider, api_key)
 
     # Build the request body — Anthropic needs different format
     url, req_body = _build_request(provider, base_url, body)
@@ -179,12 +165,10 @@ async def proxy_chat_completions(
         "error_message": None,
     }
 
-    if stream:
-        # Client must stay alive for streaming — closed in _handle_stream finally block
-        client = httpx.AsyncClient(timeout=timeout)
-        return await _handle_stream(client, url, headers, req_body, model, provider, start, meta, cfg)
-
     async with httpx.AsyncClient(timeout=timeout) as client:
+        if stream:
+            return await _handle_stream(client, url, headers, req_body, model, provider, start, meta)
+
         resp = await client.post(url, headers=headers, json=req_body)
         latency_ms = (time.monotonic() - start) * 1000
 
@@ -194,21 +178,24 @@ async def proxy_chat_completions(
             return {"error": error_text, "status_code": resp.status_code}, meta
 
         resp_json = resp.json()
-
-        # Translate provider-specific responses back to OpenAI format
-        if provider == "anthropic":
-            resp_json = _anthropic_to_openai(resp_json, model)
-        elif provider == "gemini":
-            resp_json = _gemini_to_openai(resp_json, model)
-
         usage = resp_json.get("usage", {})
         input_tokens = usage.get("prompt_tokens", 0)
         output_tokens = usage.get("completion_tokens", 0)
         cache_read = usage.get("prompt_tokens_details", {}).get("cached_tokens", 0) if isinstance(usage.get("prompt_tokens_details"), dict) else 0
 
-        cost = calculate_cost(model, input_tokens, output_tokens, cache_read, cfg)
-        # For non-streaming: TTFT = full latency, TPS = output_tokens / (latency_ms / 1000)
-        tps = output_tokens / (latency_ms / 1000) if latency_ms > 0 and output_tokens > 0 else None
+        cost = calculate_cost(model, input_tokens, output_tokens, cache_read)
+        
+        # Check if upstream sent TPS (e.g., llama.cpp in timings.predicted_per_second)
+        tps = None
+        timings = resp_json.get("timings", {})
+        if timings:
+            tps = timings.get("predicted_per_second")  # llama.cpp generation speed
+        
+        # Fallback: calculate TPS using total latency (includes prompt processing)
+        if tps is None and latency_ms > 0 and output_tokens > 0:
+            tps = output_tokens / (latency_ms / 1000)
+        
+        # For non-streaming: TTFT = full latency (no separate first token detection)
         meta.update(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
@@ -231,12 +218,10 @@ async def _handle_stream(
     provider: str,
     start: float,
     meta: dict,
-    cfg: dict | None,
 ) -> tuple[AsyncIterator[bytes], dict]:
     """Handle streaming responses — pass through SSE chunks."""
     async def stream_generator():
         usage_data = {"input_tokens": 0, "output_tokens": 0, "cache_read": 0}
-        first_token_time = None
         try:
             async with client.stream("POST", url, headers=headers, json=body) as resp:
                 if resp.status_code >= 400:
@@ -252,37 +237,31 @@ async def _handle_stream(
                     if line.startswith("data: "):
                         chunk = line[6:]
                         if chunk.strip() == "[DONE]":
-                          # Calculate cost from accumulated usage
+                            # Calculate cost from accumulated usage
                             latency_ms = (time.monotonic() - start) * 1000
-                            cost = calculate_cost(model, usage_data["input_tokens"], usage_data["output_tokens"], usage_data["cache_read"], cfg)
+                            cost = calculate_cost(model, usage_data["input_tokens"], usage_data["output_tokens"], usage_data["cache_read"])
                             
-                            # Check if upstream sent its own TPS (e.g., llama.cpp in last chunk)
-                            # Some providers send "timings" with "tokens_per_second"
+                            # Check if upstream sent TPS (e.g., llama.cpp in timings.predicted_per_second)
                             tps = None
-                            ttft_ms = None
+                            try:
+                                if "timings" in parsed:
+                                    tps = parsed["timings"].get("predicted_per_second")  # Generation speed
+                            except (NameError, KeyError, TypeError):
+                                pass
                             
-                            # Try to get TPS from last parsed chunk's timings (llama.cpp style)
-                            if "timings" in parsed:
-                                tps = parsed["timings"].get("tokens_per_second")
-                                # TTFT from llama.cpp: prompt_eval_time is prompt processing, not TTFT
-                            
-                            # Calculate TPS: output tokens / generation duration in seconds
-                            end_time = time.monotonic()
+                            # Fallback: calculate TPS using total latency
                             out_tokens = usage_data["output_tokens"]
-                            if first_token_time is not None and out_tokens > 0 and tps is None:
-                                gen_duration_s = (end_time - first_token_time)
-                                tps = out_tokens / gen_duration_s if gen_duration_s > 0 else None
+                            if out_tokens > 0 and tps is None:
+                                tps = out_tokens / (latency_ms / 1000)
                             
-                            # TTFT: time from start to first content token
-                            if ttft_ms is None and first_token_time is not None:
-                                ttft_ms = (first_token_time - start) * 1000
                             meta.update(
                                 input_tokens=usage_data["input_tokens"],
                                 output_tokens=usage_data["output_tokens"],
                                 cache_read_tokens=usage_data["cache_read"],
+                                cache_write_tokens=0,
                                 cost=cost,
                                 latency_ms=latency_ms,
-                                time_to_first_token_ms=ttft_ms,
+                                time_to_first_token_ms=latency_ms,
                                 tokens_per_second=tps,
                             )
                             yield b"data: [DONE]\n\n"
@@ -299,12 +278,6 @@ async def _handle_stream(
                                 elif parsed.get("type") == "message_delta":
                                     u = parsed.get("usage", {})
                                     usage_data["output_tokens"] += u.get("output_tokens", 0)
-                                elif parsed.get("type") == "content_block_delta":
-                                    # First content-bearing chunk for Anthropic
-                                    if first_token_time is None:
-                                        delta = parsed.get("delta", {})
-                                        if delta.get("type") == "text_delta" and delta.get("text"):
-                                            first_token_time = time.monotonic()
                             else:
                                 # OpenAI-compatible streaming usage (in last chunk)
                                 u = parsed.get("usage", {})
@@ -314,21 +287,6 @@ async def _handle_stream(
                                     cd = u.get("prompt_tokens_details", {})
                                     if isinstance(cd, dict):
                                         usage_data["cache_read"] = cd.get("cached_tokens", usage_data["cache_read"])
-                                # Fallback: llama.cpp sends timings with prompt_n/predicted_n
-                                if usage_data["input_tokens"] == 0:
-                                    timings = parsed.get("timings", {})
-                                    if timings:
-                                        usage_data["input_tokens"] = timings.get("prompt_n", 0)
-                                        usage_data["output_tokens"] = timings.get("predicted_n", 0)
-                                # Detect first content token for OpenAI-compatible
-                                if first_token_time is None:
-                                    choices = parsed.get("choices", [])
-                                    if choices:
-                                        delta = choices[0].get("delta", {})
-                                        content = delta.get("content")
-                                        # First token: any chunk with content (regardless of role field)
-                                        if content is not None and len(str(content)) > 0:
-                                            first_token_time = time.monotonic()
                         except (json.JSONDecodeError, KeyError, TypeError):
                             pass
                     yield (line + "\n\n").encode()
@@ -337,8 +295,6 @@ async def _handle_stream(
             meta["error_message"] = str(e)[:500]
             meta["latency_ms"] = (time.monotonic() - start) * 1000
             yield f'data: {{"error": {json.dumps(str(e))}}}\n\n'.encode()
-        finally:
-            await client.aclose()
 
     return stream_generator(), meta
 
@@ -356,10 +312,10 @@ def _build_headers(provider: str, api_key: str) -> dict[str, str]:
             "content-type": "application/json",
         }
     # OpenAI-compatible (openai, groq, together, deepseek, mistral, xai, openrouter, etc.)
-    h = {"Content-Type": "application/json"}
-    if api_key:
-        h["Authorization"] = f"Bearer {api_key}"
-    return h
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
 
 
 def _build_request(provider: str, base_url: str, body: dict) -> tuple[str, dict]:
@@ -431,95 +387,3 @@ def _openai_to_gemini(body: dict) -> dict:
         gemini_body.setdefault("generationConfig", {})["maxOutputTokens"] = body["max_tokens"]
 
     return gemini_body
-
-
-def _anthropic_to_openai(resp: dict, model: str) -> dict:
-    """Convert an Anthropic messages response to OpenAI chat completion format."""
-    # Extract text from content blocks
-    content_blocks = resp.get("content", [])
-    text_parts = []
-    for block in content_blocks:
-        if isinstance(block, dict) and block.get("type") == "text":
-            text_parts.append(block.get("text", ""))
-        elif isinstance(block, str):
-            text_parts.append(block)
-    content = "\n".join(text_parts) if text_parts else ""
-
-    # Map stop reasons
-    stop_reason = resp.get("stop_reason")
-    finish_map = {
-        "end_turn": "stop",
-        "max_tokens": "length",
-        "stop_sequence": "stop",
-        "tool_use": "tool_calls",
-    }
-    finish_reason = finish_map.get(stop_reason, "stop")
-
-    # Usage
-    a_usage = resp.get("usage", {})
-    input_tokens = a_usage.get("input_tokens", 0)
-    output_tokens = a_usage.get("output_tokens", 0)
-    cache_read = a_usage.get("cache_read_input_tokens", 0)
-    cache_write = a_usage.get("cache_creation_input_tokens", 0)
-
-    return {
-        "id": resp.get("id", f"chatcmpl-{uuid.uuid4().hex[:24]}"),
-        "object": "chat.completion",
-        "created": int(time.time()),
-        "model": resp.get("model", model),
-        "choices": [
-            {
-                "index": 0,
-                "message": {"role": "assistant", "content": content},
-                "finish_reason": finish_reason,
-            }
-        ],
-        "usage": {
-            "prompt_tokens": input_tokens,
-            "completion_tokens": output_tokens,
-            "total_tokens": input_tokens + output_tokens,
-            "prompt_tokens_details": {"cached_tokens": cache_read},
-        },
-    }
-
-
-def _gemini_to_openai(resp: dict, model: str) -> dict:
-    """Convert a Gemini generateContent response to OpenAI chat completion format."""
-    candidates = resp.get("candidates", [])
-    content = ""
-    finish_reason = "stop"
-    if candidates:
-        candidate = candidates[0]
-        parts = candidate.get("content", {}).get("parts", [])
-        text_parts = [p.get("text", "") for p in parts if "text" in p]
-        content = "\n".join(text_parts)
-        reason = candidate.get("finishReason", "")
-        if reason == "MAX_TOKENS":
-            finish_reason = "length"
-        elif reason == "SAFETY":
-            finish_reason = "content_filter"
-
-    usage_meta = resp.get("usageMetadata", {})
-    input_tokens = usage_meta.get("promptTokenCount", 0)
-    output_tokens = usage_meta.get("candidatesTokenCount", 0)
-    cached = usage_meta.get("cachedContentTokenCount", 0)
-
-    return {
-        "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
-        "object": "chat.completion",
-        "created": int(time.time()),
-        "model": model,
-        "choices": [
-            {
-                "index": 0,
-                "message": {"role": "assistant", "content": content},
-                "finish_reason": finish_reason,
-            }
-        ],
-        "usage": {
-            "prompt_tokens": input_tokens,
-            "completion_tokens": output_tokens,
-            "total_tokens": input_tokens + output_tokens,
-            "prompt_tokens_details": {"cached_tokens": cached},
-        },
-    }

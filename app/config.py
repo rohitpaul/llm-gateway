@@ -50,8 +50,8 @@ def get_provider_api_key(provider: str) -> Optional[str]:
     env_var = env_map.get(provider.lower())
     if env_var:
         return os.getenv(env_var)
-    # Fallback: GATEWAY_<PROVIDER>_KEY
-    return os.getenv(f"GATEWAY_{provider.upper()}_KEY")
+    # Fallback: GATEWAY_<PROVIDER>_KEY (replace hyphens with underscores)
+    return os.getenv(f"GATEWAY_{provider.upper().replace('-', '_')}_KEY")
 
 
 # Provider base URLs
