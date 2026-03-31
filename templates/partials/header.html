@@ -1,8 +1,23 @@
-<!-- Header -->
+      <!-- Header -->
 <header x-show="authenticated" x-cloak class="border-b border-gray-800 px-3 sm:px-6 py-3 sm:py-4">
     <div class="max-w-7xl mx-auto flex items-center justify-between">
         <div class="flex items-center gap-2 sm:gap-3">
-            <div class="w-7 h-7 sm:w-8 sm:h-8 bg-blue-600 rounded-lg flex items-center justify-center font-bold text-xs sm:text-sm">G</div>
+            <!-- Logo -->
+            <svg class="w-7 h-7 sm:w-8 sm:h-8" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                <rect width="32" height="32" rx="6" fill="#060C1A"/>
+                <g fill="#06B6D4">
+                    <rect x="6" y="10" width="8" height="8" rx="2"/>
+                    <rect x="18" y="10" width="8" height="8" rx="2"/>
+                    <rect x="6" y="18" width="8" height="8" rx="2"/>
+                    <rect x="18" y="18" width="8" height="8" rx="2"/>
+                </g>
+                <g stroke="#3B82F6" stroke-width="2" fill="none">
+                    <line x1="14" y1="14" x2="18" y2="14"/>
+                    <line x1="14" y1="18" x2="18" y2="18"/>
+                    <line x1="16" y1="12" x2="16" y2="10"/>
+                    <line x1="16" y1="22" x2="16" y2="20"/>
+                </g>
+            </svg>
             <h1 class="text-lg sm:text-xl font-semibold">Gateway</h1>
             <span class="text-xs text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded hidden sm:inline-block" x-text="summary.total_requests + ' requests'"></span>
         </div>

@@ -1,9 +1,24 @@
 
-<!-- Login Screen -->
+      <!-- Login Screen -->
 <div x-show="!authenticated" x-cloak class="min-h-screen flex items-center justify-center">
     <div class="bg-gray-900 rounded-xl p-8 border border-gray-800 w-full max-w-sm">
         <div class="flex items-center gap-3 mb-6">
-            <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center font-bold text-lg">G</div>
+            <!-- Logo -->
+            <svg class="w-10 h-10" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                <rect width="32" height="32" rx="6" fill="#060C1A"/>
+                <g fill="#06B6D4">
+                    <rect x="6" y="10" width="8" height="8" rx="2"/>
+                    <rect x="18" y="10" width="8" height="8" rx="2"/>
+                    <rect x="6" y="18" width="8" height="8" rx="2"/>
+                    <rect x="18" y="18" width="8" height="8" rx="2"/>
+                </g>
+                <g stroke="#3B82F6" stroke-width="2" fill="none">
+                    <line x1="14" y1="14" x2="18" y2="14"/>
+                    <line x1="14" y1="18" x2="18" y2="18"/>
+                    <line x1="16" y1="12" x2="16" y2="10"/>
+                    <line x1="16" y1="22" x2="16" y2="20"/>
+                </g>
+            </svg>
             <div>
                 <h1 class="text-xl font-semibold text-gray-100">LLM Gateway</h1>
                 <p class="text-xs text-gray-500">Sign in to access the dashboard</p>
