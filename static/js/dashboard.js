@@ -42,6 +42,10 @@ function gateway() {
         selectedModel: '',
         modelsLoading: false,
 
+        // Performance metrics
+        percentiles: { p50: null, p90: null, p95: null, p99: null },
+        errorStats: { total_requests: 0, successful_requests: 0, failed_requests: 0, error_rate: 0, errors_by_type: {} },
+
         // Auth state
         authenticated: false,
         adminKey: '',
@@ -159,6 +163,8 @@ function gateway() {
                 this.loadProviderStats(),
                 this.loadRequests(),
                 this.loadKeys(),
+                this.loadPercentiles(),
+                this.loadErrorStats(),
             ];
             promises.push(this.loadDailyStats());
             
@@ -234,12 +240,28 @@ function gateway() {
             } catch {}
         },
 
-        async loadDailyStats() {
+    async loadDailyStats() {
             // Backwards compat — called from loadAll for refresh
             return this.loadChartData();
         },
 
-     _renderChartsDaily(data) {
+        async loadPercentiles() {
+            try {
+                const r = await this.apiFetch('/api/stats/percentiles');
+                if (!r.ok) return;
+                this.percentiles = await r.json();
+            } catch {}
+        },
+
+        async loadErrorStats() {
+            try {
+                const r = await this.apiFetch('/api/stats/errors');
+                if (!r.ok) return;
+                this.errorStats = await r.json();
+            } catch {}
+        },
+
+        _renderChartsDaily(data) {
             // Aggregate by date
             const dayMap = {};
             const now = new Date();

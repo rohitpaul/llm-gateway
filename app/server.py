@@ -601,6 +601,21 @@ async def stats_hourly(request: Request, admin: dict = Depends(verify_admin)):
     return {"hourly": await db.get_hourly_stats(date_from, date_to, key_id, model)}
 
 
+@app.get("/api/stats/percentiles")
+async def stats_percentiles(request: Request, admin: dict = Depends(verify_admin)):
+    """Get latency percentiles (p50, p90, p95, p99)."""
+    date_from = request.query_params.get("date_from")
+    model = request.query_params.get("model")
+    return await db.get_latency_percentiles(date_from, model)
+
+
+@app.get("/api/stats/errors")
+async def stats_errors(request: Request, admin: dict = Depends(verify_admin)):
+    """Get error statistics and breakdown."""
+    date_from = request.query_params.get("date_from")
+    return await db.get_error_stats(date_from)
+
+
 @app.get("/api/requests")
 async def list_requests(request: Request, admin: dict = Depends(verify_admin)):
     key_id = _int_param(request, "key_id")

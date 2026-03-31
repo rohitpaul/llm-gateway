@@ -592,6 +592,121 @@ class Database:
             rows = await cur.fetchall()
         return _rows_to_dicts(rows)
 
+    async def get_latency_percentiles(
+        self,
+        date_from: str | None = None,
+        model: str | None = None,
+    ) -> dict[str, float | None]:
+        """Calculate latency percentiles (p50, p90, p95, p99) from recent requests.
+        
+        Returns dict with p50, p90, p95, p99 latency in ms.
+        """
+        conditions: list[str] = ["status = 'success'"]
+        params: list[Any] = []
+
+        if date_from is not None:
+            conditions.append("created_at >= ?")
+            params.append(date_from)
+        if model is not None:
+            conditions.append("model = ?")
+            params.append(model)
+
+        where = " AND ".join(conditions)
+
+        # Get all latencies
+        sql = f"SELECT latency_ms FROM requests WHERE {where} AND latency_ms IS NOT NULL ORDER BY latency_ms"
+        async with self.db.execute(sql, params) as cur:
+            rows = await cur.fetchall()
+
+        latencies = [r[0] for r in rows if r[0] is not None]
+
+        if not latencies:
+            return {"p50": None, "p90": None, "p95": None, "p99": None}
+
+        latencies.sort()
+        n = len(latencies)
+
+        def percentile(p: int) -> float:
+            idx = int(n * p / 100)
+            idx = min(idx, n - 1)
+            return latencies[idx]
+
+        return {
+            "p50": round(percentile(50), 2),
+            "p90": round(percentile(90), 2),
+            "p95": round(percentile(95), 2),
+            "p99": round(percentile(99), 2),
+        }
+
+    async def get_error_stats(
+        self,
+        date_from: str | None = None,
+    ) -> dict[str, Any]:
+        """Get error statistics from recent requests.
+        
+        Returns:
+            - total_requests: total request count
+            - successful_requests: successful request count
+            - failed_requests: failed request count
+            - error_rate: percentage of failed requests
+            - errors_by_type: breakdown of error types
+        """
+        conditions: list[str] = []
+        params: list[Any] = []
+
+        if date_from is not None:
+            conditions.append("created_at >= ?")
+            params.append(date_from)
+
+        where = ""
+        if conditions:
+            where = "WHERE " + " AND ".join(conditions)
+
+        # Get totals
+        async with self.db.execute(
+            f"SELECT COUNT(*), SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) FROM requests {where}",
+            params
+        ) as cur:
+            row = await cur.fetchone()
+            total = row[0]
+            successful = row[1] or 0
+            failed = row[2] or 0
+
+        error_rate = (failed / total * 100) if total > 0 else 0.0
+
+        # Get error breakdown
+        async with self.db.execute(
+            f"""
+            SELECT 
+                CASE 
+                    WHEN error_message LIKE '%401%' THEN 'Authentication'
+                    WHEN error_message LIKE '%404%' THEN 'Not Found'
+                    WHEN error_message LIKE '%429%' THEN 'Rate Limit'
+                    WHEN error_message LIKE '%500%' OR error_message LIKE '%502%' OR error_message LIKE '%503%' THEN 'Server Error'
+                    WHEN error_message LIKE '%timeout%' OR error_message LIKE '%Timeout%' THEN 'Timeout'
+                    ELSE 'Other'
+                END as error_type,
+                COUNT(*) as count
+            FROM requests 
+            {where}
+            AND status = 'error'
+            GROUP BY error_type
+            ORDER BY count DESC
+            """,
+            params
+        ) as cur:
+            error_rows = await cur.fetchall()
+
+        errors_by_type = {r[0]: r[1] for r in error_rows}
+
+        return {
+            "total_requests": total,
+            "successful_requests": successful,
+            "failed_requests": failed,
+            "error_rate": round(error_rate, 2),
+            "errors_by_type": errors_by_type,
+        }
+
     async def get_summary(
         self,
         date_from: str | None = None,
