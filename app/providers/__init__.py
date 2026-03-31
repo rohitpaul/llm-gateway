@@ -39,7 +39,7 @@ PRICING: dict[str, dict[str, float]] = {
     # Anthropic
     "claude-sonnet-4-5-20250514": {"input": 3.00, "output": 15.00, "cache_read": 0.30},
     "claude-opus-4-20250514": {"input": 15.00, "output": 75.00, "cache_read": 1.50},
-    "claude-haiku-4-5-20250514": {"input": 0.80, "output": 4.00, "cache_read": 0.08},
+    "claude-haiku-4-5-20241022": {"input": 0.80, "output": 4.00, "cache_read": 0.08},
     "claude-3-5-haiku-20241022": {"input": 0.80, "output": 4.00, "cache_read": 0.08},
     # Google
     "gemini-2.5-pro": {"input": 1.25, "output": 10.00, "cache_read": 0.315},
@@ -53,6 +53,13 @@ PRICING: dict[str, dict[str, float]] = {
     "mistral-small": {"input": 0.20, "output": 0.60},
     "mistral-medium": {"input": 0.80, "output": 2.40},
     "mistral-large": {"input": 2.00, "output": 6.00},
+    # llama-swap / Self-hosted models (set to 0 for free local inference)
+    # Adjust these values if you want to track electricity/compute costs
+    "Qwen3.5-27B": {"input": 0.00, "output": 0.00},
+    "Qwen3.5-9B": {"input": 0.00, "output": 0.00},
+    "Qwen3.5-4B": {"input": 0.00, "output": 0.00},
+    "GLM-OCR": {"input": 0.00, "output": 0.00},
+    "MiniMax-M2.7": {"input": 0.00, "output": 0.00},
 }
 
 
@@ -61,8 +68,34 @@ def calculate_cost(
     input_tokens: int,
     output_tokens: int,
     cache_read_tokens: int = 0,
+    config: dict = None,
 ) -> float:
-    """Calculate cost in USD for a request."""
+    """Calculate cost in USD for a request.
+    
+    Args:
+        model: Model name
+        input_tokens: Number of input tokens
+        output_tokens: Number of output tokens
+        cache_read_tokens: Number of cached tokens (discounted)
+        config: Optional config dict with model pricing overrides
+    
+    Returns:
+        Cost in USD
+    """
+    # Check for config override first
+    if config:
+        model_routes = config.get("models", {})
+        if model in model_routes:
+            model_config = model_routes[model]
+            if isinstance(model_config, dict) and "pricing" in model_config:
+                prices = model_config["pricing"]
+                input_price = prices.get("input", 0) / 1_000_000
+                output_price = prices.get("output", 0) / 1_000_000
+                cache_price = prices.get("cache_read", prices.get("input", 0) * 0.5) / 1_000_000
+                regular_input = max(0, input_tokens - cache_read_tokens)
+                return (regular_input * input_price) + (cache_read_tokens * cache_price) + (output_tokens * output_price)
+    
+    # Fall back to default pricing
     prices = PRICING.get(model, {"input": 0, "output": 0})
     input_price = prices.get("input", 0) / 1_000_000
     output_price = prices.get("output", 0) / 1_000_000
@@ -168,7 +201,7 @@ async def proxy_chat_completions(
     if stream:
         # For streaming, create client outside context manager so it stays alive during streaming
         client = httpx.AsyncClient(timeout=timeout)
-        return await _handle_stream(client, url, headers, req_body, model, provider, start, meta)
+        return await _handle_stream(client, url, headers, req_body, model, provider, start, meta, cfg)
     
     async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(url, headers=headers, json=req_body)
@@ -185,7 +218,7 @@ async def proxy_chat_completions(
         output_tokens = usage.get("completion_tokens", 0)
         cache_read = usage.get("prompt_tokens_details", {}).get("cached_tokens", 0) if isinstance(usage.get("prompt_tokens_details"), dict) else 0
 
-        cost = calculate_cost(model, input_tokens, output_tokens, cache_read)
+        cost = calculate_cost(model, input_tokens, output_tokens, cache_read, cfg)
         
         # Check if upstream sent TPS (e.g., llama.cpp in timings.predicted_per_second)
         tps = None
@@ -220,6 +253,7 @@ async def _handle_stream(
     provider: str,
     start: float,
     meta: dict,
+    cfg: dict,
 ) -> tuple[AsyncIterator[bytes], dict]:
     """Handle streaming responses — pass through SSE chunks."""
     async def stream_generator():
@@ -243,7 +277,7 @@ async def _handle_stream(
                         if chunk.strip() == "[DONE]":
                             # Calculate cost from accumulated usage
                             latency_ms = (time.monotonic() - start) * 1000
-                            cost = calculate_cost(model, usage_data["input_tokens"], usage_data["output_tokens"], usage_data["cache_read"])
+                            cost = calculate_cost(model, usage_data["input_tokens"], usage_data["output_tokens"], usage_data["cache_read"], cfg)
                             
                             # Check if upstream sent TPS (e.g., llama.cpp in timings.predicted_per_second)
                             tps = None
