@@ -252,19 +252,30 @@ async def _handle_stream(
                     if line.startswith("data: "):
                         chunk = line[6:]
                         if chunk.strip() == "[DONE]":
-                            # Calculate cost from accumulated usage
+                          # Calculate cost from accumulated usage
                             latency_ms = (time.monotonic() - start) * 1000
                             cost = calculate_cost(model, usage_data["input_tokens"], usage_data["output_tokens"], usage_data["cache_read"], cfg)
+                            
+                            # Check if upstream sent its own TPS (e.g., llama.cpp in last chunk)
+                            # Some providers send "timings" with "tokens_per_second"
+                            tps = None
+                            ttft_ms = None
+                            
+                            # Try to get TPS from last parsed chunk's timings (llama.cpp style)
+                            if "timings" in parsed:
+                                tps = parsed["timings"].get("tokens_per_second")
+                                # TTFT from llama.cpp: prompt_eval_time is prompt processing, not TTFT
+                            
                             # Calculate TPS: output tokens / generation duration in seconds
                             end_time = time.monotonic()
-                            out_tokens = usage_data["output_tokens"]
-                            if first_token_time is not None and out_tokens > 0:
+                            out_tokens=usage_...ns"]
+                            if first_token_time is not None and out_tokens > 0 and tps is None:
                                 gen_duration_s = (end_time - first_token_time)
                                 tps = out_tokens / gen_duration_s if gen_duration_s > 0 else None
-                            else:
-                                tps = None
+                            
                             # TTFT: time from start to first content token
-                            ttft_ms = (first_token_time - start) * 1000 if first_token_time is not None else None
+                            if ttft_ms is None and first_token_time is not None:
+                                ttft_ms = (first_token_time - start) * 1000
                             meta.update(
                                 input_tokens=usage_data["input_tokens"],
                                 output_tokens=usage_data["output_tokens"],
@@ -309,14 +320,15 @@ async def _handle_stream(
                                     if timings:
                                         usage_data["input_tokens"] = timings.get("prompt_n", 0)
                                         usage_data["output_tokens"] = timings.get("predicted_n", 0)
-                                # Detect first content token for OpenAI-compatible
-                                if first_token_time is None:
-                                    choices = parsed.get("choices", [])
-                                    if choices:
-                                        delta = choices[0].get("delta", {})
-                                        content = delta.get("content")
-                                        if content is not None and delta.get("role") is None:
-                                            first_token_time = time.monotonic()
+                       # Detect first content token for OpenAI-compatible
+                        if first_token_time is None:
+                            choices = parsed.get("choices", [])
+                            if choices:
+                                delta = choices[0].get("delta", {})
+                                content = delta.get("content")
+                                # First token: any chunk with content (regardless of role field)
+                                if content is not None and len(str(content)) > 0:
+                                    first_token_time=time.monotonic()
                         except (json.JSONDecodeError, KeyError, TypeError):
                             pass
                     yield (line + "\n\n").encode()
