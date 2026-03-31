@@ -165,10 +165,12 @@ async def proxy_chat_completions(
         "error_message": None,
     }
 
+    if stream:
+        # For streaming, create client outside context manager so it stays alive during streaming
+        client = httpx.AsyncClient(timeout=timeout)
+        return await _handle_stream(client, url, headers, req_body, model, provider, start, meta)
+    
     async with httpx.AsyncClient(timeout=timeout) as client:
-        if stream:
-            return await _handle_stream(client, url, headers, req_body, model, provider, start, meta)
-
         resp = await client.post(url, headers=headers, json=req_body)
         latency_ms = (time.monotonic() - start) * 1000
 
@@ -222,6 +224,8 @@ async def _handle_stream(
     """Handle streaming responses — pass through SSE chunks."""
     async def stream_generator():
         usage_data = {"input_tokens": 0, "output_tokens": 0, "cache_read": 0}
+        response_parts = []  # Accumulate content for response body
+        parsed = {}  # Last parsed chunk (for response body building)
         try:
             async with client.stream("POST", url, headers=headers, json=body) as resp:
                 if resp.status_code >= 400:
@@ -253,6 +257,35 @@ async def _handle_stream(
                             out_tokens = usage_data["output_tokens"]
                             if out_tokens > 0 and tps is None:
                                 tps = out_tokens / (latency_ms / 1000)
+                            
+                            # Build response body from accumulated chunks for logging
+                            try:
+                                # Build a complete response object from accumulated data
+                                response_body = {
+                                    "id": parsed.get("id", f"chatcmpl-stream-{meta.get('request_id', '')[:24]}") if parsed else f"chatcmpl-stream-{meta.get('request_id', '')[:24]}",
+                                    "object": "chat.completion",
+                                    "created": parsed.get("created", int(time.time())) if parsed else int(time.time()),
+                                    "model": model,
+                                    "choices": [{
+                                        "index": 0,
+                                        "message": {
+                                            "role": "assistant",
+                                            "content": "".join(response_parts) if response_parts else ""
+                                        },
+                                        "finish_reason": parsed.get("choices", [{}])[0].get("finish_reason", "stop") if parsed and parsed.get("choices") else "stop"
+                                    }],
+                                    "usage": {
+                                        "prompt_tokens": usage_data["input_tokens"],
+                                        "completion_tokens": usage_data["output_tokens"],
+                                        "total_tokens": usage_data["input_tokens"] + usage_data["output_tokens"]
+                                    }
+                                }
+                                # Add timings if available
+                                if parsed and "timings" in parsed:
+                                    response_body["timings"] = parsed["timings"]
+                                meta["response_body"] = json.dumps(response_body)
+                            except (NameError, KeyError, TypeError, json.JSONDecodeError):
+                                pass
                             
                             meta.update(
                                 input_tokens=usage_data["input_tokens"],
@@ -287,6 +320,21 @@ async def _handle_stream(
                                     cd = u.get("prompt_tokens_details", {})
                                     if isinstance(cd, dict):
                                         usage_data["cache_read"] = cd.get("cached_tokens", usage_data["cache_read"])
+                                else:
+                                    # llama.cpp uses timings instead of usage
+                                    timings = parsed.get("timings", {})
+                                    if timings:
+                                        usage_data["input_tokens"] = timings.get("prompt_n", usage_data["input_tokens"])
+                                        usage_data["output_tokens"] = timings.get("predicted_n", usage_data["output_tokens"])
+                                        usage_data["cache_read"] = timings.get("cache_n", 0)
+                                
+                                # Accumulate content for response body (handle both content and reasoning_content)
+                                choices = parsed.get("choices", [])
+                                if choices:
+                                    delta = choices[0].get("delta", {})
+                                    content = delta.get("content") or delta.get("reasoning_content")
+                                    if content:
+                                        response_parts.append(content)
                         except (json.JSONDecodeError, KeyError, TypeError):
                             pass
                     yield (line + "\n\n").encode()
@@ -295,6 +343,9 @@ async def _handle_stream(
             meta["error_message"] = str(e)[:500]
             meta["latency_ms"] = (time.monotonic() - start) * 1000
             yield f'data: {{"error": {json.dumps(str(e))}}}\n\n'.encode()
+        finally:
+            # Close the client after streaming is done
+            await client.aclose()
 
     return stream_generator(), meta
 
