@@ -286,21 +286,19 @@ class Database:
         return cursor.rowcount > 0
 
     async def delete_key(self, key_id: int) -> bool:
-        """Delete a virtual key. Soft-deletes (deactivates) if it has request history."""
-        # Check if key has any requests (FK constraint prevents hard delete)
-        row = await self.db.execute(
-            "SELECT COUNT(*) FROM requests WHERE virtual_key_id = ?", (key_id,)
+        """Delete a virtual key and all associated request history."""
+        # Delete associated requests first (FK constraint)
+        await self.db.execute(
+            "DELETE FROM requests WHERE virtual_key_id = ?", (key_id,)
         )
-        count = (await row.fetchone())[0]
-        if count > 0:
-            # Soft delete: deactivate instead of removing
-            cursor = await self.db.execute(
-                "UPDATE virtual_keys SET is_active = 0 WHERE id = ?", (key_id,)
-            )
-        else:
-            cursor = await self.db.execute(
-                "DELETE FROM virtual_keys WHERE id = ?", (key_id,)
-            )
+        # Delete daily usage records
+        await self.db.execute(
+            "DELETE FROM daily_usage WHERE virtual_key_id = ?", (key_id,)
+        )
+        # Delete the key itself
+        cursor = await self.db.execute(
+            "DELETE FROM virtual_keys WHERE id = ?", (key_id,)
+        )
         await self.db.commit()
         return cursor.rowcount > 0
 
