@@ -327,6 +327,7 @@ async def chat_completions(request: Request):
                     error_message=meta.get("error_message"),
                     source_ip=request.client.host if request.client else None,
                     request_body=_serialize_body(body),
+                    response_body=meta.get("response_body"),
                     time_to_first_token_ms=meta.get("time_to_first_token_ms"),
                     tokens_per_second=meta.get("tokens_per_second"),
                 )
