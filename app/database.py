@@ -531,6 +531,8 @@ class Database:
                 COUNT(*) AS request_count,
                 COALESCE(SUM(input_tokens), 0) AS input_tokens,
                 COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+                COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
                 COALESCE(SUM(cost), 0) AS cost
             FROM requests
             {where}
@@ -937,18 +939,20 @@ class Database:
             "SELECT COALESCE(SUM(request_count),0),"
             "       COALESCE(SUM(input_tokens),0),"
             "       COALESCE(SUM(output_tokens),0),"
+            "       COALESCE(SUM(cache_read_tokens),0),"
+            "       COALESCE(SUM(cache_write_tokens),0),"
             "       COALESCE(SUM(cost),0.0) FROM daily_usage"
         ) as cur:
-            total_requests, total_input, total_output, total_cost = await cur.fetchone()
+            total_requests, total_input, total_output, cache_read, cache_write, total_cost = await cur.fetchone()
         
         async with self.db.execute(
-            "SELECT model, SUM(request_count), SUM(input_tokens), SUM(output_tokens), SUM(cost)"
+            "SELECT model, SUM(request_count), SUM(input_tokens), SUM(output_tokens), SUM(cache_read_tokens), SUM(cache_write_tokens), SUM(cost)"
             " FROM daily_usage GROUP BY model ORDER BY SUM(cost) DESC"
         ) as cur:
             model_rows = await cur.fetchall()
         
         async with self.db.execute(
-            "SELECT provider, SUM(request_count), SUM(input_tokens), SUM(output_tokens), SUM(cost)"
+            "SELECT provider, SUM(request_count), SUM(input_tokens), SUM(output_tokens), SUM(cache_read_tokens), SUM(cache_write_tokens), SUM(cost)"
             " FROM daily_usage GROUP BY provider ORDER BY SUM(cost) DESC"
         ) as cur:
             provider_rows = await cur.fetchall()
@@ -967,6 +971,8 @@ class Database:
         add_counter("llm_gateway_requests_total", "Total requests", total_requests, model_rows)
         add_counter("llm_gateway_input_tokens_total", "Input tokens", total_input, model_rows)
         add_counter("llm_gateway_output_tokens_total", "Output tokens", total_output, model_rows)
+        add_counter("llm_gateway_cache_read_tokens_total", "Cached input tokens", cache_read, model_rows)
+        add_counter("llm_gateway_cache_write_tokens_total", "Cached output tokens", cache_write, model_rows)
         add_counter("llm_gateway_cost_total", "Cost in USD", total_cost, model_rows)
         
         # Request-based latency/TPS metrics (last N requests)
