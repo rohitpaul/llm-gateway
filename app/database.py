@@ -904,168 +904,105 @@ class Database:
 
     # -- prometheus metrics ---------------------------------------------------
 
-    async def get_prometheus_metrics(self) -> str:
-        """Return Prometheus text-format metrics from daily_usage + recent requests.
+    # -- prometheus metrics ---------------------------------------------------
 
-        Counters (from daily_usage, cumulative):
+    async def get_prometheus_metrics(self) -> str:
+        """Return Prometheus metrics with consistent labels.
+        
+        Counters (cumulative from daily_usage):
           - llm_gateway_requests_total
-          - llm_gateway_input_tokens_total
+          - llm_gateway_input_tokens_total  
           - llm_gateway_output_tokens_total
           - llm_gateway_cost_total
-
-        Gauges (from last N requests):
-          - llm_gateway_latency_ms_avg
-          - llm_gateway_ttft_ms_avg
-          - llm_gateway_tps_avg
+        
+        Gauges (request-based for debugging):
+          - llm_gateway_latency_ms_last_1
+          - llm_gateway_latency_ms_last_5
+          - llm_gateway_latency_ms_last_15
         """
-        lines: list[str] = []
-
-        # --- Counters from daily_usage ---
-        # Overall totals
+        lines = []
+        from collections import defaultdict
+        
+        # Counters from daily_usage
         async with self.db.execute(
             "SELECT COALESCE(SUM(request_count),0),"
             "       COALESCE(SUM(input_tokens),0),"
             "       COALESCE(SUM(output_tokens),0),"
-            "       COALESCE(SUM(cost),0.0)"
-            " FROM daily_usage"
+            "       COALESCE(SUM(cost),0.0) FROM daily_usage"
         ) as cur:
-            row = await cur.fetchone()
-            total_requests = row[0]
-            total_input = row[1]
-            total_output = row[2]
-            total_cost = row[3]
-
-        # Per-model breakdown
+            total_requests, total_input, total_output, total_cost = await cur.fetchone()
+        
         async with self.db.execute(
-            "SELECT model, SUM(request_count), SUM(input_tokens),"
-            "       SUM(output_tokens), SUM(cost)"
+            "SELECT model, SUM(request_count), SUM(input_tokens), SUM(output_tokens), SUM(cost)"
             " FROM daily_usage GROUP BY model ORDER BY SUM(cost) DESC"
         ) as cur:
             model_rows = await cur.fetchall()
-
-        # Per-provider breakdown
+        
         async with self.db.execute(
-            "SELECT provider, SUM(request_count), SUM(input_tokens),"
-            "       SUM(output_tokens), SUM(cost)"
+            "SELECT provider, SUM(request_count), SUM(input_tokens), SUM(output_tokens), SUM(cost)"
             " FROM daily_usage GROUP BY provider ORDER BY SUM(cost) DESC"
         ) as cur:
             provider_rows = await cur.fetchall()
-
-        # Per-model+provider breakdown
+        
+        def esc(s): return s.replace('\\', '\\\\').replace('"', '\\" ')
+        
+        # Helper to add counter metric
+        def add_counter(name, help_text, base_val, rows):
+            lines.append("# HELP " + name)
+            lines.append("# TYPE " + name + " counter")
+            lines.append(name + " " + str(base_val))
+            for r in rows:
+                lines.append("{" + 'model":"' + esc(r[0]) + '"} ' + str(r[1]))
+        
+        # Counters
+        add_counter("llm_gateway_requests_total", "Total requests", total_requests, model_rows)
+        add_counter("llm_gateway_input_tokens_total", "Input tokens", total_input, model_rows)
+        add_counter("llm_gateway_output_tokens_total", "Output tokens", total_output, model_rows)
+        add_counter("llm_gateway_cost_total", "Cost in USD", total_cost, model_rows)
+        
+        # Request-based latency/TPS metrics (last N requests)
         async with self.db.execute(
-            "SELECT model, provider, SUM(request_count), SUM(input_tokens),"
-            "       SUM(output_tokens), SUM(cost)"
-            " FROM daily_usage GROUP BY model, provider ORDER BY SUM(cost) DESC"
-        ) as cur:
-            mp_rows = await cur.fetchall()
-
-        def _esc(s: str) -> str:
-            return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
-
-        # Requests total
-        lines.append("# HELP llm_gateway_requests_total Total number of proxied requests.")
-        lines.append("# TYPE llm_gateway_requests_total counter")
-        lines.append(f"llm_gateway_requests_total {total_requests}")
-        for r in model_rows:
-            lines.append(f'llm_gateway_requests_total{{model="{_esc(r[0])}"}} {r[1]}')
-        for r in provider_rows:
-            lines.append(f'llm_gateway_requests_total{{provider="{_esc(r[0])}"}} {r[1]}')
-        for r in mp_rows:
-            lines.append(f'llm_gateway_requests_total{{model="{_esc(r[0])}",provider="{_esc(r[1])}"}} {r[2]}')
-
-        # Input tokens total
-        lines.append("")
-        lines.append("# HELP llm_gateway_input_tokens_total Total input tokens processed.")
-        lines.append("# TYPE llm_gateway_input_tokens_total counter")
-        lines.append(f"llm_gateway_input_tokens_total {total_input}")
-        for r in model_rows:
-            lines.append(f'llm_gateway_input_tokens_total{{model="{_esc(r[0])}"}} {r[2]}')
-        for r in provider_rows:
-            lines.append(f'llm_gateway_input_tokens_total{{provider="{_esc(r[0])}"}} {r[2]}')
-
-        # Output tokens total
-        lines.append("")
-        lines.append("# HELP llm_gateway_output_tokens_total Total output tokens generated.")
-        lines.append("# TYPE llm_gateway_output_tokens_total counter")
-        lines.append(f"llm_gateway_output_tokens_total {total_output}")
-        for r in model_rows:
-            lines.append(f'llm_gateway_output_tokens_total{{model="{_esc(r[0])}"}} {r[3]}')
-        for r in provider_rows:
-            lines.append(f'llm_gateway_output_tokens_total{{provider="{_esc(r[0])}"}} {r[3]}')
-
-        # Cost total
-        lines.append("")
-        lines.append("# HELP llm_gateway_cost_total Total cost in USD.")
-        lines.append("# TYPE llm_gateway_cost_total counter")
-        lines.append(f"llm_gateway_cost_total {total_cost:.6f}")
-        for r in model_rows:
-            lines.append(f'llm_gateway_cost_total{{model="{_esc(r[0])}"}} {r[4]:.6f}')
-        for r in provider_rows:
-            lines.append(f'llm_gateway_cost_total{{provider="{_esc(r[0])}"}} {r[4]:.6f}')
-
-        # --- Gauges from recent requests (last 1/5/15 per model) ---
-        # Get recent requests for latency/TPS calculations
-        async with self.db.execute(
-            "SELECT model, latency_ms, time_to_first_token_ms, tokens_per_second"
-            " FROM requests WHERE status='success' ORDER BY id DESC LIMIT 500"
+            "SELECT model, latency_ms, time_to_first_token_ms, tokens_per_second FROM requests WHERE status='success' ORDER BY id DESC LIMIT 500"
         ) as cur:
             recent = await cur.fetchall()
-
-        # Group by model
-        from collections import defaultdict
-        by_model: dict[str, list[tuple]] = defaultdict(list)
-        all_latencies = []
-        all_ttft = []
-        all_tps = []
-        for r in recent:
-            model, lat, ttft, tps = r[0], r[1], r[2], r[3]
+        
+        by_model = defaultdict(list)
+        all_lats, all_ttft, all_tps = [], [], []
+        for model, lat, ttft, tps in recent:
             by_model[model].append((lat, ttft, tps))
-            if lat is not None:
-                all_latencies.append(lat)
-            if ttft is not None:
-                all_ttft.append(ttft)
-            if tps is not None:
-                all_tps.append(tps)
-
-        def _avg(vals: list, n: int) -> float:
-            return sum(vals[:n]) / n if vals[:n] else 0.0
-
-        for window in (1, 5, 15):
-            lines.append("")
-            lines.append(
-                f"# HELP llm_gateway_latency_ms_last_{window} "
-                f"Average latency in ms over last {window} successful requests."
-            )
-            lines.append(f"# TYPE llm_gateway_latency_ms_last_{window} gauge")
-            lines.append(f"llm_gateway_latency_ms_last_{window} {_avg(all_latencies, window):.2f}")
+            if lat: all_lats.append(lat)
+            if ttft: all_ttft.append(ttft)
+            if tps: all_tps.append(tps)
+        
+        def avg(vals, n): return sum(vals[:n]) / n if vals[:n] else 0.0
+        
+        for n in [1, 5, 15]:
+            lines.append("# HELP llm_gateway_latency_ms_last_" + str(n) + " Avg latency over last " + str(n) + " requests")
+            lines.append("# TYPE llm_gateway_latency_ms_last_" + str(n) + " gauge")
+            lines.append("llm_gateway_latency_ms_last_" + str(n) + " " + str(avg(all_lats, n)))
             for model, entries in sorted(by_model.items()):
-                lats = [e[0] for e in entries if e[0] is not None]
-                lines.append(f'llm_gateway_latency_ms_last_{window}{{model="{_esc(model)}"}} {_avg(lats, window):.2f}')
-
-            lines.append("")
-            lines.append(
-                f"# HELP llm_gateway_ttft_ms_last_{window} "
-                f"Average time-to-first-token in ms over last {window} successful requests."
-            )
-            lines.append(f"# TYPE llm_gateway_ttft_ms_last_{window} gauge")
-            lines.append(f"llm_gateway_ttft_ms_last_{window} {_avg(all_ttft, window):.2f}")
+                lats = [e[0] for e in entries if e[0]]
+                lines.append("{" + 'model":"' + esc(model) + '"} ' + str(avg(lats, n)))
+        
+        for n in [1, 5, 15]:
+            lines.append("# HELP llm_gateway_ttft_ms_last_" + str(n) + " Avg TTFT over last " + str(n) + " requests")
+            lines.append("# TYPE llm_gateway_ttft_ms_last_" + str(n) + " gauge")
+            lines.append("llm_gateway_ttft_ms_last_" + str(n) + " " + str(avg(all_ttft, n)))
             for model, entries in sorted(by_model.items()):
-                ttfts = [e[1] for e in entries if e[1] is not None]
-                lines.append(f'llm_gateway_ttft_ms_last_{window}{{model="{_esc(model)}"}} {_avg(ttfts, window):.2f}')
-
-            lines.append("")
-            lines.append(
-                f"# HELP llm_gateway_tps_last_{window} "
-                f"Average tokens per second over last {window} successful requests."
-            )
-            lines.append(f"# TYPE llm_gateway_tps_last_{window} gauge")
-            lines.append(f"llm_gateway_tps_last_{window} {_avg(all_tps, window):.2f}")
+                ttfts = [e[1] for e in entries if e[1]]
+                lines.append("{" + 'model":"' + esc(model) + '"} ' + str(avg(ttfts, n)))
+        
+        for n in [1, 5, 15]:
+            lines.append("# HELP llm_gateway_tps_last_" + str(n) + " Avg TPS over last " + str(n) + " requests")
+            lines.append("# TYPE llm_gateway_tps_last_" + str(n) + " gauge")
+            lines.append("llm_gateway_tps_last_" + str(n) + " " + str(avg(all_tps, n)))
             for model, entries in sorted(by_model.items()):
-                tpss = [e[2] for e in entries if e[2] is not None]
-                lines.append(f'llm_gateway_tps_last_{window}{{model="{_esc(model)}"}} {_avg(tpss, window):.2f}')
-
+                tpss = [e[2] for e in entries if e[2]]
+                lines.append("{" + 'model":"' + esc(model) + '"} ' + str(avg(tpss, n)))
+        
         lines.append("")
         return "\n".join(lines)
+        
 
     # -- maintenance ---------------------------------------------------------
 
