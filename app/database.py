@@ -24,7 +24,7 @@ from app import config
 # ---------------------------------------------------------------------------
 
 # Current schema version — bump when adding migrations.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 _CREATE_SCHEMA_META = """
 CREATE TABLE IF NOT EXISTS _schema_meta (
@@ -124,6 +124,11 @@ _MIGRATIONS: dict[int, list[str]] = {
         "CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);",
         "CREATE INDEX IF NOT EXISTS idx_requests_model_provider ON requests(model, provider);",
         "CREATE INDEX IF NOT EXISTS idx_daily_usage_date_key ON daily_usage(date, virtual_key_id);",
+    ],
+    # v5: Add cache token tracking to daily_usage for better cost visibility
+    5: [
+        "ALTER TABLE daily_usage ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0;",
+        "ALTER TABLE daily_usage ADD COLUMN cache_write_tokens INTEGER NOT NULL DEFAULT 0;",
     ],
 }
 
@@ -363,21 +368,23 @@ class Database:
                     (total, virtual_key_id),
                 )
 
-        # Upsert daily_usage.
+       # Upsert daily_usage.
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         await self.db.execute(
             """
             INSERT INTO daily_usage
                 (date, virtual_key_id, model, provider, request_count,
-                 input_tokens, output_tokens, cost)
-            VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+                 input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost)
+            VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
             ON CONFLICT(date, virtual_key_id, model, provider) DO UPDATE SET
                 request_count = request_count + 1,
-                input_tokens  = input_tokens  + excluded.input_tokens,
-                output_tokens = output_tokens + excluded.output_tokens,
+                input_tokens=***  + excluded.input_tokens,
+                output_tokens=*** + excluded.output_tokens,
+                cache_read_tokens=***  + excluded.cache_read_tokens,
+                cache_write_tokens=*** + excluded.cache_write_tokens,
                 cost           = cost           + excluded.cost
             """,
-            (today, virtual_key_id, model, provider, input_tokens, output_tokens, cost),
+            (today, virtual_key_id, model, provider, input_tokens, output_tokens, cache_read, cache_write, cost),
         )
 
         # Single commit for all three operations.
@@ -820,6 +827,8 @@ class Database:
             SELECT COALESCE(SUM(request_count), 0)  AS total_requests,
                    COALESCE(SUM(input_tokens),  0)   AS total_input_tokens,
                    COALESCE(SUM(output_tokens), 0)   AS total_output_tokens,
+                   COALESCE(SUM(cache_read_tokens), 0) AS total_cache_read_tokens,
+                   COALESCE(SUM(cache_write_tokens), 0) AS total_cache_write_tokens,
                    COALESCE(SUM(cost), 0.0)           AS total_cost,
                    COUNT(DISTINCT model)              AS unique_models
             FROM daily_usage

@@ -29,6 +29,29 @@
                 <div class="text-lg sm:text-2xl font-bold" x-text="formatTokens(summary.total_output_tokens || 0)">0</div>
             </div>
         </div>
+        
+        <!-- Cache Stats -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4">
+            <div class="bg-gray-900 rounded-lg p-3 sm:p-4 border border-gray-800">
+                <div class="text-[10px] sm:text-xs text-gray-400 mb-0.5 sm:mb-1">Cached Input</div>
+                <div class="text-lg sm:text-2xl font-bold text-yellow-400" x-text="formatTokens(summary.total_cache_read_tokens || 0)">0</div>
+            </div>
+            <div class="bg-gray-900 rounded-lg p-3 sm:p-4 border border-gray-800">
+                <div class="text-[10px] sm:text-xs text-gray-400 mb-0.5 sm:mb-1">Cache Hit Rate</div>
+                <div class="text-lg sm:text-2xl font-bold text-blue-400" 
+                     x-text="(summary.total_input_tokens && summary.total_input_tokens > 0) ? ((summary.total_cache_read_tokens / summary.total_input_tokens * 100).toFixed(1) + '%') : '0.0%'">
+                    0.0%</div>
+            </div>
+            <div class="bg-gray-900 rounded-lg p-3 sm:p-4 border border-gray-800">
+                <div class="text-[10px] sm:text-xs text-gray-400 mb-0.5 sm:mb-1">Cached Write</div>
+                <div class="text-lg sm:text-2xl font-bold text-purple-400" x-text="formatTokens(summary.total_cache_write_tokens || 0)">0</div>
+            </div>
+            <div class="bg-gray-900 rounded-lg p-3 sm:p-4 border border-gray-800">
+                <div class="text-[10px] sm:text-xs text-gray-400 mb-0.5 sm:mb-1">Cache Savings</div>
+                <div class="text-lg sm:text-2xl font-bold text-green-400" 
+                     x-text="formatCacheSavings()">$0.00</div>
+            </div>
+        </div>
 
         <!-- Provider Stats with Error Rate -->
         <div class="bg-gray-900 rounded-lg p-4 border border-gray-800">

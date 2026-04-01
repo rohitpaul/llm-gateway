@@ -634,6 +634,21 @@ function gateway() {
             return (n || 0).toString();
         },
 
+        formatCacheSavings() {
+            // Calculate savings from cached tokens
+            const cached = this.summary.total_cache_read_tokens || 0;
+            if (cached === 0) return '$0.00';
+            
+            // Estimate savings: assume 80% discount on cached tokens
+            // This is an approximation based on typical provider pricing
+            const avgInputPrice = 2.50 / 1_000_000; // $2.50 per 1M tokens (average)
+            const avgCachePrice = 0.50 / 1_000_000;  // $0.50 per 1M tokens (average cached)
+            const savingsPerToken = avgInputPrice - avgCachePrice;
+            const totalSavings = cached * savingsPerToken;
+            
+            return '$' + totalSavings.toFixed(2);
+        },
+
         formatTime(iso) {
             if (!iso) return '';
             // Server stores UTC timestamps without Z — append it
