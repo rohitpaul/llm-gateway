@@ -957,7 +957,10 @@ class Database:
         ) as cur:
             provider_rows = await cur.fetchall()
         
-        def esc(s): return s.replace('\\', '\\\\').replace('"', '\\" ')
+        def esc_prom_label(s):
+            # Escape backslashes and single quotes for Prometheus labels
+            # DO NOT escape double quotes - Prometheus uses them unescaped
+            return s.replace('\\', '\\\\').replace("'", "\\'")
         
         # Helper to add counter metric
         def add_counter(name, help_text, base_val, rows):
@@ -965,7 +968,7 @@ class Database:
             lines.append("# TYPE " + name + " counter")
             lines.append(name + " " + str(base_val))
             for r in rows:
-                lines.append("{" + 'model":"' + esc(r[0]) + '"} ' + str(r[1]))
+                lines.append("{" + f'model="{esc_prom_label(r[0])}"}' + f" {r[1]}")
         
         # Counters
         add_counter("llm_gateway_requests_total", "Total requests", total_requests, model_rows)
