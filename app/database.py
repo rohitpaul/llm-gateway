@@ -969,7 +969,7 @@ class Database:
             lines.append(name + " " + str(base_val))
             for r in rows:
                 label = f'model="{esc_prom_label(r[0])}"'
-                lines.append("{" + label + "} " + str(r[1]))
+                lines.append(name + "{" + label + "} " + str(r[1]))
         
         # Counters
         add_counter("llm_gateway_requests_total", "Total requests", total_requests, model_rows)
