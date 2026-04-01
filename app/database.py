@@ -996,31 +996,34 @@ class Database:
         def avg(vals, n): return sum(vals[:n]) / n if vals[:n] else 0.0
         
         for n in [1, 5, 15]:
-            lines.append("# HELP llm_gateway_latency_ms_last_" + str(n) + " Avg latency over last " + str(n) + " requests")
-            lines.append("# TYPE llm_gateway_latency_ms_last_" + str(n) + " gauge")
-            lines.append("llm_gateway_latency_ms_last_" + str(n) + " " + str(avg(all_lats, n)))
+            metric = "llm_gateway_latency_ms_last_" + str(n)
+            lines.append("# HELP " + metric + " Avg latency over last " + str(n) + " requests")
+            lines.append("# TYPE " + metric + " gauge")
+            lines.append(metric + " " + str(avg(all_lats, n)))
             for model, entries in sorted(by_model.items()):
                 lats = [e[0] for e in entries if e[0]]
                 label = f'model="{esc_prom_label(model)}"'
-                lines.append("{" + label + "} " + str(avg(lats, n)))
+                lines.append(metric + "{" + label + "} " + str(avg(lats, n)))
         
         for n in [1, 5, 15]:
-            lines.append("# HELP llm_gateway_ttft_ms_last_" + str(n) + " Avg TTFT over last " + str(n) + " requests")
-            lines.append("# TYPE llm_gateway_ttft_ms_last_" + str(n) + " gauge")
-            lines.append("llm_gateway_ttft_ms_last_" + str(n) + " " + str(avg(all_ttft, n)))
+            metric = "llm_gateway_ttft_ms_last_" + str(n)
+            lines.append("# HELP " + metric + " Avg TTFT over last " + str(n) + " requests")
+            lines.append("# TYPE " + metric + " gauge")
+            lines.append(metric + " " + str(avg(all_ttft, n)))
             for model, entries in sorted(by_model.items()):
                 ttfts = [e[1] for e in entries if e[1]]
                 label = f'model="{esc_prom_label(model)}"'
-                lines.append("{" + label + "} " + str(avg(ttfts, n)))
+                lines.append(metric + "{" + label + "} " + str(avg(ttfts, n)))
         
         for n in [1, 5, 15]:
-            lines.append("# HELP llm_gateway_tps_last_" + str(n) + " Avg TPS over last " + str(n) + " requests")
-            lines.append("# TYPE llm_gateway_tps_last_" + str(n) + " gauge")
-            lines.append("llm_gateway_tps_last_" + str(n) + " " + str(avg(all_tps, n)))
+            metric = "llm_gateway_tps_last_" + str(n)
+            lines.append("# HELP " + metric + " Avg TPS over last " + str(n) + " requests")
+            lines.append("# TYPE " + metric + " gauge")
+            lines.append(metric + " " + str(avg(all_tps, n)))
             for model, entries in sorted(by_model.items()):
                 tpss = [e[2] for e in entries if e[2]]
                 label = f'model="{esc_prom_label(model)}"'
-                lines.append("{" + label + "} " + str(avg(tpss, n)))
+                lines.append(metric + "{" + label + "} " + str(avg(tpss, n)))
         
         lines.append("")
         return "\n".join(lines)
