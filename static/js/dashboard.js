@@ -109,23 +109,41 @@ function gateway() {
                 this.loginLoading = false;
                 return;
             }
-            const valid = await this.verifyKey(key);
-            this.loginLoading = false;
-            if (valid) {
-                this.adminKey = key;
-                localStorage.setItem('gateway_admin_key', key);
-                this.authenticated = true;
-                this.loginKey = '';
-                this.loginError = '';
-                await this.loadAll();
-                this._refreshInterval = setInterval(() => this.loadAll(), 10000);
-            } else {
-                this.loginError = 'Invalid admin key';
+            
+            // Call login endpoint to set session cookie
+            try {
+                const r = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key })
+                });
+                const data = await r.json();
+                
+                if (data.success) {
+                    this.adminKey = key;
+                    localStorage.setItem('gateway_admin_key', key);
+                    this.authenticated=true;
+                    this.loginKey = '';
+                    this.loginError = '';
+                    await this.loadAll();
+                    this._refreshInterval = setInterval(() => this.loadAll(), 10000);
+                } else {
+                    this.loginError = data.error || 'Invalid admin key';
+                }
+            } catch (e) {
+                this.loginError = 'Login failed: ' + e.message;
             }
+            
+            this.loginLoading = false;
         },
 
-        signOut() {
-            this.authenticated = false;
+        async signOut() {
+            // Clear server session cookie
+            try {
+                await fetch('/api/auth/logout', { method: 'POST' });
+            } catch {}
+            
+            this.authenticated=false;
             this.adminKey = '';
             localStorage.removeItem('gateway_admin_key');
             if (this._refreshInterval) clearInterval(this._refreshInterval);

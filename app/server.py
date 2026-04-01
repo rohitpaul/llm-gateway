@@ -15,11 +15,12 @@ from datetime import datetime, timezone
 from typing import Any, AsyncIterator
 import time
 
-from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi import FastAPI, Request, HTTPException, Depends, Response as FastAPIResponse
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.cors import CORSMiddleware
+from starlette.datastructures import URL
 import httpx
 
 # Configure structured logging to stdout (captured by Docker)
@@ -185,10 +186,25 @@ def generate_key() -> tuple[str, str, str]:
 
 def extract_bearer_token(request: Request) -> str | None:
     """Extract Bearer token from Authorization header."""
-    auth = request.headers.get("Authorization", "")
+    auth=request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
         return auth[7:].strip()
     return None
+
+
+def extract_session_token(request: Request) -> str | None:
+    """Extract session token from cookie."""
+    return request.cookies.get("gateway_session")
+
+
+def extract_admin_token(request: Request) -> str | None:
+    """Extract admin token from Bearer header or session cookie."""
+    # Try Bearer token first
+    token = extract_bearer_token(request)
+    if token:
+        return token
+    # Fall back to session cookie
+    return extract_session_token(request)
 
 
 # ---------------------------------------------------------------------------
@@ -226,11 +242,16 @@ async def verify_virtual_key(request: Request) -> dict:
 
 
 async def verify_admin(request: Request) -> dict:
-    """Verify admin key only."""
-    info = await verify_virtual_key(request)
-    if not info.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin access required")
-    return info
+    """Verify admin key from Bearer header or session cookie."""
+    token = extract_admin_token(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+    
+    # Check if it's the admin key
+    if token == config.ADMIN_KEY:
+        return {"id": None, "name": "admin", "is_admin": True}
+    
+    raise HTTPException(status_code=403, detail="Admin access required")
 
 
 # ---------------------------------------------------------------------------
@@ -522,6 +543,39 @@ async def auth_verify(request: Request):
         return {"valid": True, "name": admin.get("name", "admin")}
     except HTTPException:
         return JSONResponse(content={"valid": False}, status_code=401)
+
+
+@app.post("/api/auth/login")
+async def auth_login(request: Request, response: FastAPIResponse):
+    """Login with admin key. Sets session cookie for browser access."""
+    try:
+        body = await request.json()
+        key = body.get("key", "")
+        
+        if key == config.ADMIN_KEY:
+            # Set session cookie (valid for 7 days)
+            response = JSONResponse(content={"success": True})
+            response.set_cookie(
+                key="gateway_session",
+                value=config.ADMIN_KEY,
+                max_age=60 * 60 * 24 * 7,  # 7 days
+                httponly=True,
+                samesite="lax",
+                secure=True,
+            )
+            return response
+        else:
+            return JSONResponse(content={"success": False, "error": "Invalid key"}, status_code=401)
+    except Exception as e:
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(response: FastAPIResponse):
+    """Logout. Clears session cookie."""
+    response = JSONResponse(content={"success": True})
+    response.delete_cookie(key="gateway_session")
+    return response
 
 
 
