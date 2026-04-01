@@ -1001,7 +1001,8 @@ class Database:
             lines.append("llm_gateway_latency_ms_last_" + str(n) + " " + str(avg(all_lats, n)))
             for model, entries in sorted(by_model.items()):
                 lats = [e[0] for e in entries if e[0]]
-                lines.append("{" + 'model":"' + esc(model) + '"} ' + str(avg(lats, n)))
+                label = f'model="{esc_prom_label(model)}"'
+                lines.append("{" + label + "} " + str(avg(lats, n)))
         
         for n in [1, 5, 15]:
             lines.append("# HELP llm_gateway_ttft_ms_last_" + str(n) + " Avg TTFT over last " + str(n) + " requests")
@@ -1009,7 +1010,8 @@ class Database:
             lines.append("llm_gateway_ttft_ms_last_" + str(n) + " " + str(avg(all_ttft, n)))
             for model, entries in sorted(by_model.items()):
                 ttfts = [e[1] for e in entries if e[1]]
-                lines.append("{" + 'model":"' + esc(model) + '"} ' + str(avg(ttfts, n)))
+                label = f'model="{esc_prom_label(model)}"'
+                lines.append("{" + label + "} " + str(avg(ttfts, n)))
         
         for n in [1, 5, 15]:
             lines.append("# HELP llm_gateway_tps_last_" + str(n) + " Avg TPS over last " + str(n) + " requests")
@@ -1017,7 +1019,8 @@ class Database:
             lines.append("llm_gateway_tps_last_" + str(n) + " " + str(avg(all_tps, n)))
             for model, entries in sorted(by_model.items()):
                 tpss = [e[2] for e in entries if e[2]]
-                lines.append("{" + 'model":"' + esc(model) + '"} ' + str(avg(tpss, n)))
+                label = f'model="{esc_prom_label(model)}"'
+                lines.append("{" + label + "} " + str(avg(tpss, n)))
         
         lines.append("")
         return "\n".join(lines)
