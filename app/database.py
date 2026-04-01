@@ -364,11 +364,11 @@ class Database:
             total = input_tokens + output_tokens
             if total > 0:
                 await self.db.execute(
-                    "UPDATE virtual_keys SET tokens_used = tokens_used + ? WHERE id = ?",
+                "UPDATE virtual_keys SET tokens_used = tokens_used + ? WHERE id = ?",
                     (total, virtual_key_id),
                 )
 
-       # Upsert daily_usage.
+        # Upsert daily_usage.
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         await self.db.execute(
             """
@@ -378,11 +378,11 @@ class Database:
             VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
             ON CONFLICT(date, virtual_key_id, model, provider) DO UPDATE SET
                 request_count = request_count + 1,
-                input_tokens=***  + excluded.input_tokens,
-                output_tokens=*** + excluded.output_tokens,
-                cache_read_tokens=***  + excluded.cache_read_tokens,
-                cache_write_tokens=*** + excluded.cache_write_tokens,
-                cost           = cost           + excluded.cost
+                input_tokens = input_tokens + excluded.input_tokens,
+                output_tokens = output_tokens + excluded.output_tokens,
+                cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
+                cache_write_tokens = cache_write_tokens + excluded.cache_write_tokens,
+                cost = cost + excluded.cost
             """,
             (today, virtual_key_id, model, provider, input_tokens, output_tokens, cache_read, cache_write, cost),
         )

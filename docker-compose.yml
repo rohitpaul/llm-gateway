@@ -15,6 +15,7 @@ services:
       - GATEWAY_DB=/data/gateway.db
       - GATEWAY_ADMIN_KEY=${GATEWAY_ADMIN_KEY:?GATEWAY_ADMIN_KEY must be set}
       - GATEWAY_CORS_ORIGINS=${GATEWAY_CORS_ORIGINS:-}
+      - PYTHONUNBUFFERED=1
       - TZ=America/New_York
 
 volumes:

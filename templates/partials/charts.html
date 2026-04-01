@@ -1,4 +1,4 @@
-   <!-- Charts Tab -->
+<!-- Charts Tab -->
     <div x-show="tab==='charts'" x-cloak class="fade-in space-y-6">
         <div class="bg-gray-900 rounded-lg p-4 border border-gray-800">
             <!-- Filters -->
@@ -29,13 +29,21 @@
 
             <!-- Charts grid -->
             <div class="grid md:grid-cols-2 gap-4 sm:gap-6">
-                <!-- Chart 1: Token Volume -->
+                <!-- Chart 1: Token Volume (Input, Output, Cache) -->
                 <div class="h-52 sm:h-64">
                     <div id="chartTokens"></div>
                 </div>
                 <!-- Chart 2: Cost -->
                 <div class="h-52 sm:h-64">
                     <div id="chartCost"></div>
+                </div>
+                <!-- Chart 3: Cache Hits -->
+                <div class="h-52 sm:h-64">
+                    <div id="chartCache"></div>
+                </div>
+                <!-- Chart 4: Token Distribution (Pie) -->
+                <div class="h-52 sm:h-64">
+                    <div id="chartDistribution"></div>
                 </div>
             </div>
         </div>

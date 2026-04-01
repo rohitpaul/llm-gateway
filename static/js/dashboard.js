@@ -297,14 +297,16 @@ function gateway() {
                 const d = new Date(now);
                 d.setDate(d.getDate() - i);
                 const key = d.toISOString().slice(0, 10);
-                dayMap[key] = { requests: 0, input_tokens: 0, output_tokens: 0, cost: 0 };
+                dayMap[key] = { requests: 0, input_tokens: 0, output_tokens: 0, cost: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
             }
             for (const row of data) {
-                if (!dayMap[row.date]) dayMap[row.date] = { requests: 0, input_tokens: 0, output_tokens: 0, cost: 0 };
+                if (!dayMap[row.date]) dayMap[row.date] = { requests: 0, input_tokens: 0, output_tokens: 0, cost: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
                 dayMap[row.date].requests += row.request_count || 0;
                 dayMap[row.date].input_tokens += row.input_tokens || 0;
                 dayMap[row.date].output_tokens += row.output_tokens || 0;
                 dayMap[row.date].cost += row.cost || 0;
+                dayMap[row.date].cache_read_tokens += row.cache_read_tokens || 0;
+                dayMap[row.date].cache_write_tokens += row.cache_write_tokens || 0;
             }
             const dates = Object.keys(dayMap).sort();
             const labels = dates.map(d => {
@@ -332,11 +334,15 @@ function gateway() {
                             data: dates.map(d => (dayMap[d].input_tokens || 0) / 1000),
                         },
                         {
+                            name: 'Cached Tokens (K)',
+                            data: dates.map(d => (dayMap[d].cache_read_tokens || 0) / 1000),
+                        },
+                        {
                             name: 'Output Tokens (K)',
                             data: dates.map(d => (dayMap[d].output_tokens || 0) / 1000),
                         },
                     ],
-                    colors: ['#3b82f6', '#a78bfa'],
+                    colors: ['#3b82f6', '#10b981', '#a78bfa'],
                     plotOptions: { bar: { borderRadius: 3, columnWidth: '60%' } },
                     dataLabels: { enabled: false },
                     xaxis: {
@@ -407,6 +413,137 @@ function gateway() {
                 });
                 this.chartInstances.cost.render();
             }
+
+            // Chart 3: Cache Hits Rate (line chart)
+            const cacheEl = document.getElementById('chartCache');
+            if (cacheEl) {
+                if (this.chartInstances.cache) this.chartInstances.cache.destroy();
+                // Calculate cache hit rate
+                const cacheRates = dates.map(d => {
+                    const input = dayMap[d].input_tokens || 0;
+                    const cached = dayMap[d].cache_read_tokens || 0;
+                    return input > 0 ? (cached / input * 100) : 0;
+                });
+                this.chartInstances.cache = new ApexCharts(cacheEl, {
+                    chart: {
+                        type: 'area',
+                        height: '100%',
+                        background: 'transparent',
+                        toolbar: { show: false },
+                        fontFamily: 'inherit',
+                        animations: { enabled: false },
+                    },
+                    series: [
+                        {
+                            name: 'Cache Hit Rate (%)',
+                            data: cacheRates,
+                        },
+                    ],
+                    colors: ['#10b981'],
+                    fill: {
+                        type: 'gradient',
+                        gradient: {
+                            shadeIntensity: 0.5,
+                            opacityFrom: 0.3,
+                            opacityTo: 0.05,
+                        },
+                    },
+                    stroke: { width: 2, curve: 'smooth' },
+                    dataLabels: { enabled: false },
+                    xaxis: {
+                        categories: labels,
+                        axisBorder: { show: false },
+                        axisTicks: { show: false },
+                        labels: { style: { color: '#9ca3af', fontSize: '10px' } },
+                    },
+                    yaxis: {
+                        title: { text: 'Cache Hit Rate (%)', style: { color: '#9ca3af', fontSize: '11px' } },
+                        labels: { 
+                            style: { color: '#9ca3af', fontSize: '10px' },
+                            formatter: v => v.toFixed(1) + '%'
+                        },
+                        min: 0,
+                        max: 100,
+                    },
+                    grid: { borderColor: 'rgba(255,255,255,0.06)', strokeDashArray: 3 },
+                    legend: { labels: { colors: '#d1d5db' }, fontSize: '11px' },
+                    tooltip: { theme: 'dark' },
+                    theme: { mode: 'dark' },
+                });
+                this.chartInstances.cache.render();
+            }
+
+            // Chart 4: Token Distribution (Pie chart)
+            const distEl = document.getElementById('chartDistribution');
+            if (distEl) {
+                if (this.chartInstances.distribution) this.chartInstances.distribution.destroy();
+                // Calculate totals
+                let totalInput = 0, totalCached = 0, totalOutput = 0;
+                dates.forEach(d => {
+                    totalInput += dayMap[d].input_tokens || 0;
+                    totalCached += dayMap[d].cache_read_tokens || 0;
+                    totalOutput += dayMap[d].output_tokens || 0;
+                });
+                const total = totalInput + totalCached + totalOutput;
+                
+                this.chartInstances.distribution = new ApexCharts(distEl, {
+                    chart: {
+                        type: 'donut',
+                        height: '100%',
+                        background: 'transparent',
+                        toolbar: { show: false },
+                        fontFamily: 'inherit',
+                        animations: { enabled: false },
+                    },
+                    series: [totalInput - totalCached, totalCached, totalOutput],
+                    labels: ['Fresh Input', 'Cached', 'Output'],
+                    colors: ['#3b82f6', '#10b981', '#a78bfa'],
+                    dataLabels: {
+                        enabled: true,
+                        formatter: (val, opts) => {
+                            return val.toFixed(1) + '%';
+                        },
+                        style: { fontSize: '10px', colors: ['#fff'] },
+                    },
+                    legend: {
+                        position: 'bottom',
+                        labels: { colors: '#d1d5db' },
+                        fontSize: '11px',
+                    },
+                    tooltip: { theme: 'dark' },
+                    theme: { mode: 'dark' },
+                    plotOptions: {
+                        pie: {
+                            donut: {
+                                size: '65%',
+                                labels: {
+                                    show: true,
+                                    name: { show: true, color: '#d1d5db' },
+                                    value: {
+                                        show: true,
+                                        color: '#d1d5db',
+                                        formatter: (val) => {
+                                            // Show absolute numbers
+                                            const idx = opts.seriesIndex;
+                                            const totalTokens = totalInput + totalCached + totalOutput;
+                                            if (idx === 0) return ((totalInput - totalCached) / 1000).toFixed(1) + 'K';
+                                            if (idx === 1) return (totalCached / 1000).toFixed(1) + 'K';
+                                            return (totalOutput / 1000).toFixed(1) + 'K';
+                                        }
+                                    },
+                                    total: {
+                                        show: true,
+                                        label: 'Total',
+                                        color: '#d1d5db',
+                                        formatter: () => (total / 1000).toFixed(1) + 'K'
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+                this.chartInstances.distribution.render();
+            }
         },
 
       _renderChartsHourly(data) {
@@ -420,14 +557,16 @@ function gateway() {
                     String(d.getMonth() + 1).padStart(2, '0') + '-' +
                     String(d.getDate()).padStart(2, '0') + ' ' +
                     String(d.getHours()).padStart(2, '0') + ':00';
-                hourMap[key] = { requests: 0, input_tokens: 0, output_tokens: 0, cost: 0 };
+                hourMap[key] = { requests: 0, input_tokens: 0, output_tokens: 0, cost: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
             }
             for (const row of data) {
-                if (!hourMap[row.hour]) hourMap[row.hour] = { requests: 0, input_tokens: 0, output_tokens: 0, cost: 0 };
+                if (!hourMap[row.hour]) hourMap[row.hour] = { requests: 0, input_tokens: 0, output_tokens: 0, cost: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
                 hourMap[row.hour].requests += row.request_count || 0;
                 hourMap[row.hour].input_tokens += row.input_tokens || 0;
                 hourMap[row.hour].output_tokens += row.output_tokens || 0;
                 hourMap[row.hour].cost += row.cost || 0;
+                hourMap[row.hour].cache_read_tokens += row.cache_read_tokens || 0;
+                hourMap[row.hour].cache_write_tokens += row.cache_write_tokens || 0;
             }
             const hours = Object.keys(hourMap).sort();
             const labels = hours.map(h => {
@@ -463,9 +602,10 @@ function gateway() {
                     chart: { ...baseChart, type: 'bar', stacked: true },
                     series: [
                         { name: 'Input Tokens (K)', data: hours.map(h => (hourMap[h].input_tokens || 0) / 1000) },
+                        { name: 'Cached Tokens (K)', data: hours.map(h => (hourMap[h].cache_read_tokens || 0) / 1000) },
                         { name: 'Output Tokens (K)', data: hours.map(h => (hourMap[h].output_tokens || 0) / 1000) },
                     ],
-                    colors: ['#3b82f6', '#a78bfa'],
+                    colors: ['#3b82f6', '#10b981', '#a78bfa'],
                     plotOptions: { bar: { borderRadius: 3, columnWidth: '60%' } },
                     dataLabels: { enabled: false },
                     xaxis: baseXaxis,

@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import secrets
 import argparse
+import sys
+import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator
@@ -18,6 +21,15 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.cors import CORSMiddleware
 import httpx
+
+# Configure structured logging to stdout (captured by Docker)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s — %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    stream=sys.stdout,
+)
+logger = logging.getLogger("llm-gateway")
 
 from app import config
 from app.database import Database
@@ -288,9 +300,32 @@ async def chat_completions(request: Request):
         response, meta = await proxy_chat_completions(body, provider, app_config)
     except ValueError as e:
         # Return 400 for client-side validation errors (body size, etc.)
+        logger.warning("400 Client error: %s", str(e))
         raise HTTPException(status_code=400, detail=str(e))
+    except httpx.HTTPStatusError as e:
+        # Log upstream HTTP errors with response details
+        logger.error(
+            "Upstream HTTP %d error: provider=%s model=%s — %s | Response: %s",
+            e.response.status_code, provider, model,
+            str(e)[:200], e.response.text[:300],
+        )
+        await db.log_request(
+            virtual_key_id=key_info.get("id"),
+            request_id=str(id(request)),
+            model=model,
+            provider=provider,
+            status="error",
+            error_message=str(e)[:500],
+            source_ip=request.client.host if request.client else None,
+            request_body=_serialize_body(body),
+        )
+        raise HTTPException(status_code=502, detail=f"Upstream error: {str(e)[:200]}")
     except Exception as e:
-        # Log the error
+        # Log with full traceback
+        logger.error(
+            "Unhandled error: provider=%s model=%s — %s\n%s",
+            provider, model, str(e), traceback.format_exc(),
+        )
         await db.log_request(
             virtual_key_id=key_info.get("id"),
             request_id=str(id(request)),
