@@ -176,6 +176,7 @@ def _get_api_key(provider: str, cfg: dict) -> str | None:
 # Proxy functions
 # ---------------------------------------------------------------------------
 
+
 async def proxy_chat_completions(
     body: dict[str, Any],
     provider: str,
@@ -281,140 +282,92 @@ async def _handle_stream(
                     meta["status"] = "error"
                     meta["error_message"] = error_body.decode()[:500]
                     meta["latency_ms"] = (time.monotonic() - start) * 1000
-                    yield f'data: {{"error": {json.dumps(error_body.decode()[:500])}, "status_code": {resp.status_code}}}\n\n'.encode()
-                    yield b"data: [DONE]\n\n"
-                    return
-
+                    meta.update(
+                        input_tokens=0,
+                        output_tokens=0,
+                        cache_read_tokens=0,
+                        cache_write_tokens=0,
+                        cost=0.0,
+                        latency_ms=meta["latency_ms"],
+                        time_to_first_token_ms=meta["latency_ms"],
+                        tokens_per_second=0.0,
+                    )
+                    yield f"data: {json.dumps({'error': meta['error_message']})}\n\n"
+                    raise ValueError(meta["error_message"])
+                
                 async for line in resp.aiter_lines():
-                    if line.startswith("data: "):
-                        chunk = line[6:]
-                        if chunk.strip() == "[DONE]":
-                            # Calculate cost from accumulated usage
-                            latency_ms = (time.monotonic() - start) * 1000
-                            cost = calculate_cost(model, usage_data["input_tokens"], usage_data["output_tokens"], usage_data["cache_read"], cfg)
-                            
-                            # Check if upstream sent TPS (e.g., llama.cpp in timings.predicted_per_second)
-                            tps = None
-                            try:
-                                if "timings" in parsed:
-                                    tps = parsed["timings"].get("predicted_per_second")  # Generation speed
-                            except (NameError, KeyError, TypeError):
-                                pass
-                            
-                            # Fallback: calculate TPS using total latency
-                            out_tokens = usage_data["output_tokens"]
-                            if out_tokens > 0 and tps is None:
-                                tps = out_tokens / (latency_ms / 1000)
-                            
-                            # Build response body from accumulated chunks for logging
-                            try:
-                                # Build a complete response object from accumulated data
-                                response_body = {
-                                    "id": parsed.get("id", f"chatcmpl-stream-{meta.get('request_id', '')[:24]}") if parsed else f"chatcmpl-stream-{meta.get('request_id', '')[:24]}",
-                                    "object": "chat.completion",
-                                    "created": parsed.get("created", int(time.time())) if parsed else int(time.time()),
-                                    "model": model,
-                                    "choices": [{
-                                        "index": 0,
-                                        "message": {
-                                            "role": "assistant",
-                                            "content": "".join(response_parts) if response_parts else ""
-                                        },
-                                        "finish_reason": parsed.get("choices", [{}])[0].get("finish_reason", "stop") if parsed and parsed.get("choices") else "stop"
-                                    }],
-                                    "usage": {
-                                        "prompt_tokens": usage_data["input_tokens"],
-                                        "completion_tokens": usage_data["output_tokens"],
-                                        "total_tokens": usage_data["input_tokens"] + usage_data["output_tokens"]
-                                    }
-                                }
-                                # Add timings if available
-                                if parsed and "timings" in parsed:
-                                    response_body["timings"] = parsed["timings"]
-                                meta["response_body"] = json.dumps(response_body)
-                            except (NameError, KeyError, TypeError, json.JSONDecodeError):
-                                pass
-                            
-                            meta.update(
-                                input_tokens=usage_data["input_tokens"],
-                                output_tokens=usage_data["output_tokens"],
-                                cache_read_tokens=usage_data["cache_read"],
-                                cache_write_tokens=0,
-                                cost=cost,
-                                latency_ms=latency_ms,
-                                time_to_first_token_ms=latency_ms,
-                                tokens_per_second=tps,
-                            )
-                            yield b"data: [DONE]\n\n"
-                            return
-                        # Try to extract usage from Anthropic message_start/message_delta
-                        try:
-                            parsed = json.loads(chunk)
-                            # Anthropic streaming usage
-                            if provider == "anthropic":
-                                if parsed.get("type") == "message_start":
-                                    u = parsed.get("message", {}).get("usage", {})
-                                    usage_data["input_tokens"] = u.get("input_tokens", 0)
-                                    usage_data["cache_read"] = u.get("cache_read_input_tokens", 0)
-                                elif parsed.get("type") == "message_delta":
-                                    u = parsed.get("usage", {})
-                                    usage_data["output_tokens"] += u.get("output_tokens", 0)
-                            else:
-                                # OpenAI-compatible streaming usage (in last chunk)
-                                u = parsed.get("usage", {})
-                                if u:
-                                    usage_data["input_tokens"] = u.get("prompt_tokens", usage_data["input_tokens"])
-                                    usage_data["output_tokens"] = u.get("completion_tokens", usage_data["output_tokens"])
-                                    cd = u.get("prompt_tokens_details", {})
-                                    if isinstance(cd, dict):
-                                        usage_data["cache_read"] = cd.get("cached_tokens", usage_data["cache_read"])
-                                else:
-                                    # llama.cpp uses timings instead of usage
-                                    timings = parsed.get("timings", {})
-                                    if timings:
-                                        usage_data["input_tokens"] = timings.get("prompt_n", usage_data["input_tokens"])
-                                        usage_data["output_tokens"] = timings.get("predicted_n", usage_data["output_tokens"])
-                                        usage_data["cache_read"] = timings.get("cache_n", 0)
-                                
-                                # Accumulate content for response body (handle both content and reasoning_content)
-                                choices = parsed.get("choices", [])
-                                if choices:
-                                    delta = choices[0].get("delta", {})
-                                    content = delta.get("content") or delta.get("reasoning_content")
-                                    if content:
-                                        response_parts.append(content)
-                        except (json.JSONDecodeError, KeyError, TypeError):
-                            pass
-                    yield (line + "\n\n").encode()
+                    if not line.startswith("data: "):
+                        continue
+                    data = line[6:]  # Remove "data: " prefix
+                    if data == "[DONE]":
+                        break
+                    try:
+                        parsed = json.loads(data)
+                        chunk_content = parsed.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                        if chunk_content:
+                            response_parts.append(chunk_content)
+                            yield f"data: {chunk_content}\n\n"
+                        
+                        # Track usage from streaming
+                        if "usage" in parsed:
+                            usage_data["input_tokens"] = parsed["usage"].get("prompt_tokens", 0)
+                            usage_data["output_tokens"] = parsed["usage"].get("completion_tokens", 0)
+                            cd = parsed["usage"].get("prompt_tokens_details", {})
+                            if isinstance(cd, dict):
+                                usage_data["cache_read"] = cd.get("cached_tokens", 0)
+                    except json.JSONDecodeError:
+                        continue
+
+            # Build final response body
+            response_body = {
+                "id": parsed.get("id", ""),
+                "object": parsed.get("object", ""),
+                "created": parsed.get("created", 0),
+                "model": parsed.get("model", ""),
+                "choices": [{"delta": {"content": "".join(response_parts)}, "index": 0, "finish_reason": parsed.get("finish_reason", "")}],
+                "usage": usage_data,
+            }
+            if "timings" in parsed:
+                response_body["timings"] = parsed["timings"]
+            meta["response_body"] = json.dumps(response_body)
+            
+            meta.update(
+                input_tokens=usage_data["input_tokens"],
+                output_tokens=usage_data["output_tokens"],
+                cache_read_tokens=usage_data["cache_read"],
+                cache_write_tokens=0,
+                cost=calculate_cost(model, usage_data["input_tokens"], usage_data["output_tokens"], usage_data["cache_read"], cfg),
+                latency_ms=(time.monotonic() - start) * 1000,
+                time_to_first_token_ms=meta.get("latency_ms", 0),
+                tokens_per_second=0.0,
+            )
+            yield f"data: [DONE]\n\n"
         except Exception as e:
             meta["status"] = "error"
             meta["error_message"] = str(e)[:500]
             meta["latency_ms"] = (time.monotonic() - start) * 1000
-            yield f'data: {{"error": {json.dumps(str(e))}}}\n\n'.encode()
-        finally:
-            # Close the client after streaming is done
-            await client.aclose()
+            yield f"data: [ERROR: {e}]\n\n"
+            raise
 
     return stream_generator(), meta
 
 
 def _build_headers(provider: str, api_key: str) -> dict[str, str]:
     """Build request headers for the given provider."""
-    if provider == "anthropic":
-        return {
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        }
-    if provider == "gemini":
-        return {
-            "content-type": "application/json",
-        }
-    # OpenAI-compatible (openai, groq, together, deepseek, mistral, xai, openrouter, etc.)
-    return {
-        "Authorization": f"Bearer {api_key}",
+    headers = {
         "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
     }
+
+    # Some providers don't use Authorization header
+    if provider in ("anthropic", "gemini"):
+        del headers["Authorization"]
+        if provider == "anthropic":
+            headers["x-api-key"] = api_key
+        else:
+            headers["google-api-key"] = api_key
+
+    return headers
 
 
 def _build_request(provider: str, base_url: str, body: dict) -> tuple[str, dict]:
@@ -472,17 +425,24 @@ def _openai_to_anthropic(body: dict) -> dict:
 
 
 def _openai_to_gemini(body: dict) -> dict:
-    """Convert OpenAI chat completions format to Gemini format."""
+    """Convert OpenAI chat completions format to Google Gemini format."""
     messages = body.get("messages", [])
     contents = []
-    for msg in messages:
-        role = "model" if msg.get("role") == "assistant" else "user"
-        contents.append({"role": role, "parts": [{"text": msg.get("content", "")}]})
 
-    gemini_body: dict[str, Any] = {"contents": contents}
-    if body.get("temperature") is not None:
-        gemini_body.setdefault("generationConfig", {})["temperature"] = body["temperature"]
-    if body.get("max_tokens") is not None:
-        gemini_body.setdefault("generationConfig", {})["maxOutputTokens"] = body["max_tokens"]
+    # Build conversation history
+    for msg in messages:
+        role = "user" if msg.get("role") == "user" else ("model" if msg.get("role") == "assistant" else "system")
+        contents.append({"role": role, "parts": [msg.get("content", "")]})
+
+    gemini_body: dict[str, Any] = {
+        "contents": contents,
+        "generationConfig": {
+            "temperature": body.get("temperature", 0.7),
+            "top_p": body.get("top_p", 1.0),
+            "top_k": body.get("top_k", 40),
+            "max_output_tokens": body.get("max_tokens", 4096),
+        },
+    }
 
     return gemini_body
+

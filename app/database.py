@@ -24,7 +24,7 @@ from app import config
 # ---------------------------------------------------------------------------
 
 # Current schema version — bump when adding migrations.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _CREATE_SCHEMA_META = """
 CREATE TABLE IF NOT EXISTS _schema_meta (
@@ -118,6 +118,12 @@ _MIGRATIONS: dict[int, list[str]] = {
         "ALTER TABLE requests ADD COLUMN time_to_first_token_ms REAL;",
         "ALTER TABLE requests ADD COLUMN tokens_per_second REAL;",
         "CREATE INDEX IF NOT EXISTS idx_requests_ttft ON requests(time_to_first_token_ms);",
+    ],
+    # v4: Add composite indexes for common query patterns
+    4: [
+        "CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);",
+        "CREATE INDEX IF NOT EXISTS idx_requests_model_provider ON requests(model, provider);",
+        "CREATE INDEX IF NOT EXISTS idx_daily_usage_date_key ON daily_usage(date, virtual_key_id);",
     ],
 }
 

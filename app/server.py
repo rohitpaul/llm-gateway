@@ -10,6 +10,7 @@ import argparse
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator
+import time
 
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse, Response
@@ -286,7 +287,8 @@ async def chat_completions(request: Request):
     try:
         response, meta = await proxy_chat_completions(body, provider, app_config)
     except ValueError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Return 400 for client-side validation errors (body size, etc.)
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         # Log the error
         await db.log_request(
