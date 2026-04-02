@@ -146,6 +146,32 @@ providers:
 | `GATEWAY_PORT` | Server port | `4000` |
 | `GATEWAY_CORS_ORIGINS` | Comma-separated allowed CORS origins | *(empty = no CORS)* |
 
+## Reverse Proxy Configuration
+
+For production deployments, use a reverse proxy (Nginx recommended) in front of LLM Gateway:
+
+**Critical Settings**:
+- Disable buffering for SSE streaming
+- Long timeouts (300s+) for LLM requests
+- Large max body size (10M+) for context windows
+- Connection pooling for performance
+
+See [REVERSE_PROXY.md](REVERSE_PROXY.md) for complete configuration guides:
+- Nginx (recommended)
+- Traefik (Docker-native)
+- Caddy (automatic HTTPS)
+- Performance tuning and security hardening
+
+**Quick Nginx Example**:
+```nginx
+location / {
+    proxy_pass http://localhost:4000;
+    proxy_buffering off;  # Critical for streaming
+    proxy_read_timeout 300s;
+    client_max_body_size 10M;
+}
+```
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
