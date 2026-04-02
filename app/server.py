@@ -47,6 +47,10 @@ db = Database()
 app_config: dict = {}
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "..", "templates"))
 
+# Broadcast channel for SSE — wakes up when a request is logged
+import asyncio
+_stats_event = asyncio.Event()
+
 
 def _load_merged_config() -> dict:
     """Load base config from file, then overlay DB overrides if available.
@@ -340,6 +344,7 @@ async def chat_completions(request: Request):
             source_ip=request.client.host if request.client else None,
             request_body=_serialize_body(body),
         )
+        _stats_event.set()
         raise HTTPException(status_code=502, detail=f"Upstream error: {str(e)[:200]}")
     except Exception as e:
         # Log with full traceback
@@ -357,6 +362,7 @@ async def chat_completions(request: Request):
             source_ip=request.client.host if request.client else None,
             request_body=_serialize_body(body),
         )
+        _stats_event.set()
         raise HTTPException(status_code=502, detail=f"Upstream error: {str(e)[:200]}")
 
     if stream and isinstance(response, AsyncIterator):
@@ -389,6 +395,7 @@ async def chat_completions(request: Request):
                     time_to_first_token_ms=meta.get("time_to_first_token_ms"),
                     tokens_per_second=meta.get("tokens_per_second"),
                 )
+                _stats_event.set()
             except Exception as e:
                 print(f"Stream logging error: {e}")
 
@@ -419,6 +426,7 @@ async def chat_completions(request: Request):
         time_to_first_token_ms=meta.get("time_to_first_token_ms"),
         tokens_per_second=meta.get("tokens_per_second"),
     )
+    _stats_event.set()
 
     return JSONResponse(content=response)
 
@@ -447,6 +455,28 @@ async def list_models(key_info: dict = Depends(verify_virtual_key)):
 @app.get("/health")
 async def health():
     return {"status": "ok", "version": "0.1.0"}
+
+
+@app.get("/api/stats/stream")
+async def stats_stream(request: Request):
+    """SSE endpoint — pushes a 'stats-updated' event after every logged request.
+
+    The dashboard connects here for instant refresh. Falls back to a 15-second
+    keep-alive ping so the connection isn't dropped by intermediaries.
+    """
+    async def event_generator():
+        while True:
+            # Wait until a request is logged (or 15s keep-alive)
+            try:
+                await asyncio.wait_for(_stats_event.wait(), timeout=15.0)
+                _stats_event.clear()
+            except asyncio.TimeoutError:
+                pass
+            # Send event
+            data = json.dumps({"ts": datetime.now(timezone).isoformat()})
+            yield f"data: {data}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @app.get("/metrics")
