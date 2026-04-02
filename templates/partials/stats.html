@@ -81,9 +81,9 @@
             </div>
         </div>
 
-        <!-- Model TPS Performance -->
+        <!-- Model Performance (rolling window: last 50 requests) -->
         <div class="bg-gray-900 rounded-lg p-4 border border-gray-800">
-            <h3 class="text-sm font-medium text-gray-300 mb-3">Model Performance (Tokens/sec)</h3>
+            <h3 class="text-sm font-medium text-gray-300 mb-3">Model Performance <span class="text-gray-600 text-xs font-normal">(last 50 req)</span></h3>
             <div class="space-y-2">
                 <template x-for="m in modelStats" :key="m.model">
                     <div class="flex items-center justify-between text-sm py-1 border-b border-gray-800 last:border-0">
@@ -91,12 +91,20 @@
                             <span class="text-gray-300 truncate max-w-[150px] sm:max-w-[250px]" x-text="m.model" :title="m.model"></span>
                             <span class="text-gray-500 text-xs" x-text="(m.request_count || 0).toLocaleString() + ' req'"></span>
                         </div>
-                        <div class="flex items-center gap-4">
-                            <div class="text-right min-w-[90px]">
-                                <div class="text-xs text-gray-500">Avg TPS</div>
-                                <div class="font-bold text-blue-400" x-text="m.avg_tps ? m.avg_tps.toFixed(1) + ' tok/s' : '—'">—</div>
+                        <div class="flex items-center gap-3 sm:gap-4">
+                            <div class="text-right min-w-[70px]">
+                                <div class="text-xs text-gray-500">TPS</div>
+                                <div class="font-bold text-blue-400" x-text="m.avg_tps ? m.avg_tps.toFixed(1) : '—'">—</div>
                             </div>
-                            <div class="text-right min-w-[80px]">
+                            <div class="text-right min-w-[70px]">
+                                <div class="text-xs text-gray-500">Latency</div>
+                                <div class="font-mono text-yellow-400" x-text="m.avg_latency_ms ? (m.avg_latency_ms >= 1000 ? (m.avg_latency_ms/1000).toFixed(1) + 's' : m.avg_latency_ms.toFixed(0) + 'ms') : '—'">—</div>
+                            </div>
+                            <div class="text-right min-w-[70px]">
+                                <div class="text-xs text-gray-500">TTFT</div>
+                                <div class="font-mono text-purple-400" x-text="m.avg_ttft_ms ? (m.avg_ttft_ms >= 1000 ? (m.avg_ttft_ms/1000).toFixed(1) + 's' : m.avg_ttft_ms.toFixed(0) + 'ms') : '—'">—</div>
+                            </div>
+                            <div class="text-right min-w-[70px]">
                                 <div class="text-xs text-gray-500">Cost</div>
                                 <div class="text-green-400 font-mono" x-text="'$' + (m.cost || 0).toFixed(4)">$0.0000</div>
                             </div>

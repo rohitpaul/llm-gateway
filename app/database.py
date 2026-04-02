@@ -581,35 +581,50 @@ class Database:
         
         stats = _rows_to_dicts(rows)
         
-        # Calculate avg_tps from requests table
-        tps_conditions = []
-        tps_params = []
+        # Calculate recent performance from last 50 successful requests per model.
+        # Uses a rolling window so metrics respond to current performance.
+        perf_conditions = ["status = 'success'"]
+        perf_params: list[Any] = []
         if date_from is not None:
-            tps_conditions.append("created_at >= ?")
-            tps_params.append(date_from)
+            perf_conditions.append("created_at >= ?")
+            perf_params.append(date_from)
         if date_to is not None:
-            tps_conditions.append("created_at <= ?")
-            tps_params.append(date_to)
-        
-        tps_where = ""
-        if tps_conditions:
-            tps_where = " AND " + " AND ".join(tps_conditions)
-        
-        tps_sql = f"""
-            SELECT model, AVG(tokens_per_second) as avg_tps
-            FROM requests
-            WHERE status = 'success'
-            {tps_where}
+            perf_conditions.append("created_at <= ?")
+            perf_params.append(date_to)
+
+        perf_where = " AND ".join(perf_conditions)
+
+        perf_sql = f"""
+            SELECT model,
+                   AVG(tokens_per_second)         AS avg_tps,
+                   AVG(latency_ms)                AS avg_latency_ms,
+                   AVG(time_to_first_token_ms)    AS avg_ttft_ms
+            FROM (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY model ORDER BY id DESC) AS _rn
+                FROM requests
+                WHERE {perf_where}
+            )
+            WHERE _rn <= 50
             GROUP BY model
         """
-        async with self.db.execute(tps_sql, tps_params) as cur:
-            tps_rows = await cur.fetchall()
-        
-        tps_by_model = {row[0]: row[1] for row in tps_rows}
-        
-        # Merge TPS into stats
+        async with self.db.execute(perf_sql, perf_params) as cur:
+            perf_rows = await cur.fetchall()
+
+        perf_by_model = {
+            row["model"]: {
+                "avg_tps": row["avg_tps"],
+                "avg_latency_ms": row["avg_latency_ms"],
+                "avg_ttft_ms": row["avg_ttft_ms"],
+            }
+            for row in perf_rows
+        }
+
+        # Merge performance metrics into stats
         for stat in stats:
-            stat["avg_tps"] = tps_by_model.get(stat["model"])
+            perf = perf_by_model.get(stat["model"])
+            stat["avg_tps"] = perf["avg_tps"] if perf else None
+            stat["avg_latency_ms"] = perf["avg_latency_ms"] if perf else None
+            stat["avg_ttft_ms"] = perf["avg_ttft_ms"] if perf else None
         
         return stats
 
