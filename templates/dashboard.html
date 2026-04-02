@@ -14,13 +14,14 @@
     {% include 'partials/login.html' %}
     {% include 'partials/header.html' %}
     {% include 'partials/nav.html' %}
-    <main x-show="authenticated" x-cloak class="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
+    <main x-show="authenticated" x-cloak class="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 pb-20 md:pb-6">
         {% include 'partials/stats.html' %}
         {% include 'partials/charts.html' %}
         {% include 'partials/requests.html' %}
         {% include 'partials/models.html' %}
         {% include 'partials/keys.html' %}
     </main>
+    {% include 'partials/mobile-nav.html' %}
     {% include 'partials/request-detail-modal.html' %}
     <script src="/static/js/dashboard.js"></script>
 </body>
