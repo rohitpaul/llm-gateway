@@ -214,6 +214,10 @@ async def proxy_chat_completions(
     }
 
     if stream:
+        # Request usage data in streaming response (OpenAI stream_options spec)
+        # Most providers (llama.cpp, OpenAI, etc.) support this
+        req_body.setdefault("stream_options", {"include_usage": True})
+
         # For streaming, create client outside context manager so it stays alive during streaming
         client = httpx.AsyncClient(timeout=timeout)
         return await _handle_stream(client, url, headers, req_body, model, provider, start, meta, cfg)
@@ -235,17 +239,24 @@ async def proxy_chat_completions(
 
         cost = calculate_cost(model, input_tokens, output_tokens, cache_read, cfg)
         
-        # Check if upstream sent TPS (e.g., llama.cpp in timings.predicted_per_second)
-        tps = None
+        # Use upstream timings when available (llama.cpp sends prompt_ms + predicted_ms)
         timings = resp_json.get("timings", {})
         if timings:
-            tps = timings.get("predicted_per_second")  # llama.cpp generation speed
+            upstream_latency = timings.get("prompt_ms", 0) + timings.get("predicted_ms", 0)
+            tps = timings.get("predicted_per_second")
+            ttft = timings.get("prompt_ms", latency_ms)
+            # Prefer upstream latency over wall-clock
+            if upstream_latency > 0:
+                latency_ms = upstream_latency
+        else:
+            tps = None
+            ttft = latency_ms
         
-        # Fallback: calculate TPS using total latency (includes prompt processing)
+        # Fallback: calculate TPS using total latency
         if tps is None and latency_ms > 0 and output_tokens > 0:
             tps = output_tokens / (latency_ms / 1000)
         
-        # For non-streaming: TTFT = full latency (no separate first token detection)
+        # For non-streaming: TTFT = prompt processing time (or full latency as fallback)
         meta.update(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
@@ -253,7 +264,7 @@ async def proxy_chat_completions(
             cache_write_tokens=0,
             cost=cost,
             latency_ms=latency_ms,
-            time_to_first_token_ms=latency_ms,
+            time_to_first_token_ms=ttft,
             tokens_per_second=tps,
         )
         return resp_json, meta
@@ -304,6 +315,19 @@ async def _handle_stream(
                     try:
                         parsed = json.loads(data)
                         choices = parsed.get("choices", [])
+                        
+                        # Extract usage even from chunks with empty choices
+                        # (e.g., final usage chunk with stream_options.include_usage)
+                        if "usage" in parsed:
+                            usage_data["input_tokens"] = parsed["usage"].get("prompt_tokens", 0)
+                            usage_data["output_tokens"] = parsed["usage"].get("completion_tokens", 0)
+                            cd = parsed["usage"].get("prompt_tokens_details", {})
+                            if isinstance(cd, dict):
+                                usage_data["cache_read"] = cd.get("cached_tokens", 0)
+                            # Preserve timings from usage chunk (llama.cpp)
+                            if "timings" in parsed:
+                                parsed.setdefault("_timings", parsed["timings"])
+                        
                         if not choices:
                             continue
                         
@@ -335,14 +359,6 @@ async def _handle_stream(
                             ]
                         }
                         
-                        # Track usage from streaming
-                        if "usage" in parsed:
-                            usage_data["input_tokens"] = parsed["usage"].get("prompt_tokens", 0)
-                            usage_data["output_tokens"] = parsed["usage"].get("completion_tokens", 0)
-                            cd = parsed["usage"].get("prompt_tokens_details", {})
-                            if isinstance(cd, dict):
-                                usage_data["cache_read"] = cd.get("cached_tokens", 0)
-                        
                         # Yield if we have any content (including reasoning)
                         if chunk_content or reasoning_content or response_parts:
                             response_parts.append(chunk_content)
@@ -363,15 +379,30 @@ async def _handle_stream(
                 response_body["timings"] = parsed["timings"]
             meta["response_body"] = json.dumps(response_body)
             
+            # Use upstream timings when available (llama.cpp sends these)
+            upstream_timings = parsed.get("timings", {})
+            if upstream_timings:
+                latency_ms = upstream_timings.get("prompt_ms", 0) + upstream_timings.get("predicted_ms", 0)
+                tps = upstream_timings.get("predicted_per_second")
+                ttft = meta.get("time_to_first_token_ms", upstream_timings.get("prompt_ms"))
+            else:
+                latency_ms = (time.monotonic() - start) * 1000
+                ttft = meta.get("time_to_first_token_ms", 0)
+                tps = None
+            
+            # Fallback TPS calculation
+            if tps is None and latency_ms > 0 and usage_data["output_tokens"] > 0:
+                tps = usage_data["output_tokens"] / (latency_ms / 1000)
+            
             meta.update(
                 input_tokens=usage_data["input_tokens"],
                 output_tokens=usage_data["output_tokens"],
                 cache_read_tokens=usage_data["cache_read"],
                 cache_write_tokens=0,
                 cost=calculate_cost(model, usage_data["input_tokens"], usage_data["output_tokens"], usage_data["cache_read"], cfg),
-                latency_ms=(time.monotonic() - start) * 1000,
-                time_to_first_token_ms=meta.get("latency_ms", 0),
-                tokens_per_second=0.0,
+                latency_ms=latency_ms,
+                time_to_first_token_ms=ttft,
+                tokens_per_second=tps,
             )
             yield f"data: [DONE]\n\n"
         except Exception as e:
