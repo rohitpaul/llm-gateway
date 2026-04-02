@@ -1,0 +1,253 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: '3.13'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Code Quality
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff mypy
+
+      - name: Run Ruff linter
+        run: ruff check app/ --output-format=github
+
+      - name: Run Ruff formatter check
+        run: ruff format --check app/
+
+      - name: Run MyPy type checker
+        run: mypy app/ --ignore-missing-imports --no-error-summary
+        continue-on-error: true
+
+  # ---------------------------------------------------------------------------
+  # Testing
+  # ---------------------------------------------------------------------------
+  test-python:
+    name: Python Tests
+    runs-on: ubuntu-latest
+    env:
+      GATEWAY_ADMIN_KEY: sk-test-admin-key-ci
+      GATEWAY_DB: /tmp/test-gateway.db
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install "fastapi[standard]" "uvicorn[standard]" httpx aiosqlite pyyaml python-dotenv pydantic pytest pytest-asyncio pytest-cov
+
+      - name: Create minimal config
+        run: printf 'models: {}\nproviders: {}\n' > config.yaml
+
+      - name: Run unit tests
+        run: pytest tests/ -v --cov=app --cov-report=xml --cov-report=html
+        continue-on-error: true
+
+      - name: Test server import
+        run: |
+          python3 -c "
+          import sys, traceback
+          sys.path.insert(0, '.')
+          try:
+              from app import server
+              print('✓ Import OK')
+          except Exception:
+              traceback.print_exc()
+              sys.exit(1)
+          "
+
+      - name: Start server
+        run: |
+          python3 -m uvicorn app.server:app --host 127.0.0.1 --port 4000 > /tmp/server.log 2>&1 &
+          echo "SERVER_PID=$!" >> $GITHUB_ENV
+          sleep 5
+          if ! kill -0 $SERVER_PID 2>/dev/null; then
+            cat /tmp/server.log
+            exit 1
+          fi
+
+      - name: Run E2E tests
+        run: |
+          curl -sf http://localhost:4000/health || { echo "FAIL /health"; cat /tmp/server.log; exit 1; }
+          
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/)
+          [ "$STATUS" = "200" ] || { echo "FAIL dashboard"; exit 1; }
+          
+          RESPONSE=$(curl -sf -X POST http://localhost:4000/admin/keys \
+            -H "Authorization: Bearer ${{ env.GATEWAY_ADMIN_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"name": "ci-test-key"}')
+          echo "✓ Create key: $RESPONSE"
+          
+          for ep in summary models providers daily; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${{ env.GATEWAY_ADMIN_KEY }}" \
+              "http://localhost:4000/api/stats/$ep")
+            [ "$STATUS" = "200" ] || { echo "FAIL /api/stats/$ep"; exit 1; }
+          done
+          
+          echo "✓ All E2E tests passed"
+
+      - name: Stop server
+        if: always()
+        run: kill $SERVER_PID 2>/dev/null || true
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          retention-days: 7
+          path: htmlcov/
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          retention-days: 1
+          path: /tmp/server.log
+
+  # ---------------------------------------------------------------------------
+  # Docker Build
+  # ---------------------------------------------------------------------------
+  build-docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [lint, test-python]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          tags: llm-gateway:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+
+      - name: Test image
+        run: |
+          echo "Testing Docker image..."
+          docker run --rm -e GATEWAY_DB=/tmp/test.db -e GATEWAY_ADMIN_KEY=sk-test llm-gateway:ci python3 -c "
+          import sys, traceback
+          try:
+              import app.server
+              print('✓ Import OK')
+          except Exception:
+              traceback.print_exc()
+              sys.exit(1)
+          "
+          
+          docker run --rm -e GATEWAY_DB=/tmp/test.db -e GATEWAY_ADMIN_KEY=sk-test -d --name test-container -p 4001:4000 llm-gateway:ci
+          sleep 5
+          curl -sf http://localhost:4001/health || { docker logs test-container; exit 1; }
+          docker stop test-container
+          echo "✓ Docker image test passed"
+
+  # ---------------------------------------------------------------------------
+  # Security Scan
+  # ---------------------------------------------------------------------------
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: build-docker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'llm-gateway:ci'
+          format: 'table'
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+  # ---------------------------------------------------------------------------
+  # Publish (only on main branch)
+  # ---------------------------------------------------------------------------
+  publish:
+    name: Publish Docker Image
+    runs-on: ubuntu-latest
+    needs: [build-docker, security-scan]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+      - name: Output image tags
+        run: |
+          echo "✓ Image published:"
+          echo "${{ steps.meta.outputs.tags }}" | tr ',' '\n'

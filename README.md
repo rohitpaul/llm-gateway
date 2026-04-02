@@ -1,5 +1,10 @@
 # LLM Gateway
 
+[![CI](https://github.com/rohitpaul/llm-gateway/workflows/CI/badge.svg)](https://github.com/rohitpaul/llm-gateway/actions/workflows/ci.yml)
+[![Security](https://github.com/rohitpaul/llm-gateway/workflows/Security%20Audit/badge.svg)](https://github.com/rohitpaul/llm-gateway/actions/workflows/security-audit.yml)
+[![Release](https://github.com/rohitpaul/llm-gateway/workflows/Release/badge.svg)](https://github.com/rohitpaul/llm-gateway/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Lightweight LLM proxy with virtual API keys, per-model usage tracking, and a clean web dashboard. Drop-in LiteLLM replacement.
 
 ## Features
@@ -140,6 +145,22 @@ providers:
 | `GATEWAY_DB` | SQLite database path | `data/gateway.db` |
 | `GATEWAY_PORT` | Server port | `4000` |
 | `GATEWAY_CORS_ORIGINS` | Comma-separated allowed CORS origins | *(empty = no CORS)* |
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+
+## CI/CD Pipeline
+
+This project uses a comprehensive CI/CD pipeline:
+
+- **Automated Testing**: Linting, type checking, unit tests, E2E tests
+- **Docker Builds**: Multi-architecture images (amd64, arm64) published to GHCR
+- **Security Scanning**: Weekly vulnerability audits with Trivy
+- **Automated Releases**: GitHub releases with auto-generated changelogs
+- **Dependabot**: Weekly dependency updates
+
+See [.github/CI_CD_GUIDE.md](.github/CI_CD_GUIDE.md) for details.
 
 ## License
 
