@@ -304,9 +304,25 @@ async def _handle_stream(
                     try:
                         parsed = json.loads(data)
                         chunk_content = parsed.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                        if chunk_content:
-                            response_parts.append(chunk_content)
-                            yield f"data: {chunk_content}\n\n"
+                        
+                        # Build OpenAI-compatible SSE chunk
+                        sse_chunk = {
+                            "id": parsed.get("id", ""),
+                            "object": "chat.completion.chunk",
+                            "created": parsed.get("created", 0),
+                            "model": parsed.get("model", ""),
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "delta": {
+                                        "role": parsed.get("choices", [{}])[0].get("delta", {}).get("role", "assistant"),
+                                        "content": chunk_content
+                                    },
+                                    "logprobs": parsed.get("choices", [{}])[0].get("logprobs"),
+                                    "finish_reason": parsed.get("finish_reason") if chunk_content else None
+                                }
+                            ]
+                        }
                         
                         # Track usage from streaming
                         if "usage" in parsed:
@@ -315,6 +331,11 @@ async def _handle_stream(
                             cd = parsed["usage"].get("prompt_tokens_details", {})
                             if isinstance(cd, dict):
                                 usage_data["cache_read"] = cd.get("cached_tokens", 0)
+                        
+                        # Only yield if we have content (to avoid empty chunks)
+                        if chunk_content or response_parts:
+                            response_parts.append(chunk_content)
+                            yield f"data: {json.dumps(sse_chunk)}\n\n"
                     except json.JSONDecodeError:
                         continue
 
