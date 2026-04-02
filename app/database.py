@@ -10,6 +10,7 @@ Uses aiosqlite for non-blocking I/O and sqlite3.Row for dict-like results.
 
 from __future__ import annotations
 
+import math
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -592,7 +593,7 @@ class Database:
         
         tps_where = ""
         if tps_conditions:
-            tps_where = "WHERE " + " AND ".join(tps_conditions)
+            tps_where = " AND " + " AND ".join(tps_conditions)
         
         tps_sql = f"""
             SELECT model, AVG(tokens_per_second) as avg_tps
@@ -724,8 +725,7 @@ class Database:
         n = len(latencies)
 
         def percentile(p: int) -> float:
-            idx = int(n * p / 100)
-            idx = min(idx, n - 1)
+            idx = max(0, min(math.ceil(p / 100 * n) - 1, n - 1))
             return latencies[idx]
 
         return {
@@ -951,33 +951,30 @@ class Database:
         ) as cur:
             model_rows = await cur.fetchall()
         
-        async with self.db.execute(
-            "SELECT provider, SUM(request_count), SUM(input_tokens), SUM(output_tokens), SUM(cache_read_tokens), SUM(cache_write_tokens), SUM(cost)"
-            " FROM daily_usage GROUP BY provider ORDER BY SUM(cost) DESC"
-        ) as cur:
-            provider_rows = await cur.fetchall()
-        
         def esc_prom_label(s):
             # Escape backslashes and single quotes for Prometheus labels
             # DO NOT escape double quotes - Prometheus uses them unescaped
             return s.replace('\\', '\\\\').replace("'", "\\'")
         
-        # Helper to add counter metric
-        def add_counter(name, help_text, base_val, rows):
+        # Helper to add counter metric with per-model breakdown
+        # col_idx: which column from model_rows to use for the per-model value
+        #   0=model, 1=request_count, 2=input_tokens, 3=output_tokens,
+        #   4=cache_read_tokens, 5=cache_write_tokens, 6=cost
+        def add_counter(name, help_text, base_val, rows, col_idx):
             lines.append("# HELP " + name)
             lines.append("# TYPE " + name + " counter")
             lines.append(name + " " + str(base_val))
             for r in rows:
                 label = f'model="{esc_prom_label(r[0])}"'
-                lines.append(name + "{" + label + "} " + str(r[1]))
+                lines.append(name + "{" + label + "} " + str(r[col_idx]))
         
-        # Counters
-        add_counter("llm_gateway_requests_total", "Total requests", total_requests, model_rows)
-        add_counter("llm_gateway_input_tokens_total", "Input tokens", total_input, model_rows)
-        add_counter("llm_gateway_output_tokens_total", "Output tokens", total_output, model_rows)
-        add_counter("llm_gateway_cache_read_tokens_total", "Cached input tokens", cache_read, model_rows)
-        add_counter("llm_gateway_cache_write_tokens_total", "Cached output tokens", cache_write, model_rows)
-        add_counter("llm_gateway_cost_total", "Cost in USD", total_cost, model_rows)
+        # Counters (col_idx maps to the model_rows SELECT columns)
+        add_counter("llm_gateway_requests_total", "Total requests", total_requests, model_rows, 1)
+        add_counter("llm_gateway_input_tokens_total", "Input tokens", total_input, model_rows, 2)
+        add_counter("llm_gateway_output_tokens_total", "Output tokens", total_output, model_rows, 3)
+        add_counter("llm_gateway_cache_read_tokens_total", "Cached input tokens", cache_read, model_rows, 4)
+        add_counter("llm_gateway_cache_write_tokens_total", "Cached output tokens", cache_write, model_rows, 5)
+        add_counter("llm_gateway_cost_total", "Cost in USD", total_cost, model_rows, 6)
         
         # Request-based latency/TPS metrics (last N requests)
         async with self.db.execute(
@@ -993,7 +990,9 @@ class Database:
             if ttft: all_ttft.append(ttft)
             if tps: all_tps.append(tps)
         
-        def avg(vals, n): return sum(vals[:n]) / n if vals[:n] else 0.0
+        def avg(vals, n): 
+            slice_ = vals[:n]
+            return sum(slice_) / len(slice_) if slice_ else 0.0
         
         for n in [1, 5, 15]:
             metric = "llm_gateway_latency_ms_last_" + str(n)

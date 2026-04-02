@@ -113,7 +113,7 @@ def calculate_cost(
     prices = PRICING.get(model, {"input": 0, "output": 0})
     input_price = prices.get("input", 0) / 1_000_000
     output_price = prices.get("output", 0) / 1_000_000
-    cache_price = prices.get("cache_read", prices.get("input", 0) / 1_000_000 * 0.5) / 1_000_000
+    cache_price = prices.get("cache_read", prices.get("input", 0) * 0.5) / 1_000_000
 
     regular_input = max(0, input_tokens - cache_read_tokens)
     return (regular_input * input_price) + (cache_read_tokens * cache_price) + (output_tokens * output_price)
