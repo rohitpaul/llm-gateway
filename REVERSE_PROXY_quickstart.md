@@ -1,55 +1,34 @@
-# Reverse Proxy Configuration Summary
+# Reverse Proxy - Complete Guide
 
 ## What was created
 
 ✅ **REVERSE_PROXY.md** - Comprehensive guide (500+ lines)
-  - Critical settings for LLM workloads
-  - Nginx, Traefik, Caddy configurations
-  - Production-ready examples
-  - Security hardening
-  - Performance tuning
-  - Monitoring setup
-  - Troubleshooting guide
+✅ **examples/nginx/** - Ready-to-use configs
+  - Basic config
+  - production config with SSL
+  - nginx.conf for performance tuning
+✅ **docker-compose-nginx.yml** - Complete stack
+✅ **README.md** - Updated with overview
 
-✅ **examples/** - Ready-to-use config files
-  - `nginx/llm-gateway.conf` - Basic config
-  - `nginx/llm-gateway-production.conf` - SSL + rate limiting
-  - `nginx/nginx.conf` - Performance tuning
-  - `docker-compose-nginx.yml` - Complete stack
-  - `REVERSE_PROXY_quickstart.md` - Quick reference
+✅ **REVERSE_PROXY_QUICKstart.md** - This summary
 
-✅ **README.md** - Updated with reverse proxy section
+## critical settings for Llm workloads
 
-## Key Takeaways
+1. **Disable buffering** - `proxy_buffering off`
+2. **long timeouts** - 300s+ for slow requests
+3. **large body size** - 10M+ for big contexts
 
-### Critical Settings for LLM Gateway
+## production checklist
+- [ ] SSL/TLS configured
+- [ ] Buffering disabled
+- [ ] Timeouts increased (300s+)
+- [ ] Rate limiting enabled
+- [ ] Security headers added
+- [ ] Monitoring set up
 
-1. **Disable buffering** (`proxy_buffering off`) - Required for SSE streaming
-2. **Long timeouts** (300s+) - LLM requests can be slow
-3. **large body size** (10M+) - Large context windows
-
-### Quick Start
-```bash
-# Copy example config
-cp examples/nginx/llm-gateway.conf /etc/nginx/conf.d/
-
-# Or use Docker Compose with Nginx
-docker compose -f examples/docker-compose-nginx.yml up -d
-
-# Test
-curl http://localhost/health
-```
-
-## Next Steps
-1. Review and adjust timeouts based on your models
-2. Set up SSL certificates with Let's encrypt
-3. Configure rate limiting based on your needs
-4. Set up monitoring for nginx logs
-5. Test streaming with real workloads
-
-## Documentation structure
-- `REVERSE_PROXY.md` - Main guide
-- `examples/nginx/` - Configuration files
-- `README.md` - Overview with links
-
-All committed and ready for production use! 🚀
+## next steps
+1. Copy `examples/nginx/llm-gateway-production.conf`
+2. Update domain name
+3. Set up SSL certificates
+4. Configure rate limiting
+5. Test streaming
