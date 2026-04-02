@@ -281,11 +281,21 @@ async def _handle_stream(
     meta: dict,
     cfg: dict,
 ) -> tuple[AsyncIterator[bytes], dict]:
-    """Handle streaming responses — pass through SSE chunks."""
+    """Handle streaming responses — transparent byte-for-byte pass-through.
+
+    Extracts usage silently for DB logging without modifying what the client sees.
+    The upstream response is sent exactly as-is.
+    """
+    tps = None
+
     async def stream_generator():
+        nonlocal tps
+        accumulated = b""
         usage_data = {"input_tokens": 0, "output_tokens": 0, "cache_read": 0}
-        response_parts = []  # Accumulate content for response body
-        parsed = {}  # Last parsed chunk (for response body building)
+        response_parts = []
+        parsed = {}
+        tps = None
+
         try:
             async with client.stream("POST", url, headers=headers, json=body) as resp:
                 if resp.status_code >= 400:
@@ -300,120 +310,91 @@ async def _handle_stream(
                         cache_write_tokens=0,
                         cost=0.0,
                         latency_ms=meta["latency_ms"],
-                        time_to_first_token_ms=meta["latency_ms"],
-                        tokens_per_second=0.0,
+                        time_to_first_token_ms=0,
+                        tokens_per_second=None,
                     )
-                    yield f"data: {json.dumps({'error': meta['error_message']})}\n\n"
+                    yield json.dumps({"error": meta["error_message"]}).encode()
                     raise ValueError(meta["error_message"])
-                
-                async for line in resp.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    data = line[6:]  # Remove "data: " prefix
-                    if data == "[DONE]":
-                        break
-                    try:
-                        parsed = json.loads(data)
-                        choices = parsed.get("choices", [])
-                        
-                        # Extract usage even from chunks with empty choices
-                        # (e.g., final usage chunk with stream_options.include_usage)
-                        if "usage" in parsed:
-                            usage_data["input_tokens"] = parsed["usage"].get("prompt_tokens", 0)
-                            usage_data["output_tokens"] = parsed["usage"].get("completion_tokens", 0)
-                            cd = parsed["usage"].get("prompt_tokens_details", {})
-                            if isinstance(cd, dict):
-                                usage_data["cache_read"] = cd.get("cached_tokens", 0)
-                            # Preserve timings from usage chunk (llama.cpp)
-                            if "timings" in parsed:
-                                parsed.setdefault("_timings", parsed["timings"])
-                        
-                        if not choices:
+
+            # Stream raw bytes from upstream — no transformation
+                async for chunk in resp.aiter_bytes():
+                    # Track TTFT on first byte received
+                    if meta.get("time_to_first_token_ms") is None:
+                        meta["time_to_first_token_ms"] = (time.monotonic() - start) * 1000
+
+                    # Accumulate to extract usage without modifying what's sent
+                    accumulated += chunk
+
+                    # Process complete SSE lines for usage extraction
+                    while b"\n\n" in accumulated:
+                        line, accumulated = accumulated.split(b"\n\n", 1)
+                        if not line.startswith(b"data: "):
                             continue
-                        
-                        delta = choices[0].get("delta", {})
-                        chunk_content = delta.get("content") or ""
-                        reasoning_content = delta.get("reasoning_content") or ""
-                        
-                        # Build OpenAI-compatible SSE chunk (pass through reasoning_content)
-                        sse_delta = {
-                            "role": delta.get("role", "assistant"),
-                        }
-                        if chunk_content:
-                            sse_delta["content"] = chunk_content
-                        if reasoning_content:
-                            sse_delta["reasoning_content"] = reasoning_content
-                        
-                        sse_chunk = {
-                            "id": parsed.get("id", ""),
-                            "object": "chat.completion.chunk",
-                            "created": parsed.get("created", 0),
-                            "model": parsed.get("model", ""),
-                            "choices": [
-                                {
-                                    "index": 0,
-                                    "delta": sse_delta,
-                                    "logprobs": choices[0].get("logprobs"),
-                                    "finish_reason": choices[0].get("finish_reason")
-                                }
-                            ]
-                        }
-                        
-                        # Capture TTFT on first content-bearing chunk
-                        if (chunk_content or reasoning_content) and meta.get("time_to_first_token_ms") is None:
-                            meta["time_to_first_token_ms"] = (time.monotonic() - start) * 1000
+                        data = line[6:]
+                        if data == b"[DONE]":
+                            break
+                        try:
+                            parsed = json.loads(data)
+                            if "usage" in parsed:
+                                usage_data["input_tokens"] = parsed["usage"].get("prompt_tokens", 0)
+                                usage_data["output_tokens"] = parsed["usage"].get("completion_tokens", 0)
+                                cd = parsed["usage"].get("prompt_tokens_details", {})
+                                if isinstance(cd, dict):
+                                    usage_data["cache_read"] = cd.get("cached_tokens", 0)
+                                if "timings" in parsed:
+                                    tps = parsed["timings"].get("predicted_per_second")
+                            choices = parsed.get("choices", [])
+                            if choices:
+                                delta = choices[0].get("delta", {})
+                                content = delta.get("content") or delta.get("reasoning_content") or ""
+                                response_parts.append(content)
+                        except json.JSONDecodeError:
+                            continue
 
-                        # Yield if we have any content (including reasoning)
-                        if chunk_content or reasoning_content or response_parts:
-                            response_parts.append(chunk_content or reasoning_content)
-                            yield f"data: {json.dumps(sse_chunk)}\n\n"
-                    except json.JSONDecodeError:
-                        continue
+                    # Pass raw bytes to client unchanged
+                    yield chunk
 
-            # Build final response body
+                # Handle any remaining accumulated data after stream ends
+                if accumulated:
+                    line = accumulated.decode("utf-8", errors="replace")
+                    if line.startswith("data: "):
+                        data = line[6:]
+                        if data != "[DONE]":
+                            try:
+                                parsed = json.loads(data)
+                                if "usage" in parsed:
+                                    usage_data["input_tokens"] = parsed["usage"].get("prompt_tokens", usage_data["input_tokens"])
+                                    usage_data["output_tokens"] = parsed["usage"].get("completion_tokens", usage_data["output_tokens"])
+                                choices = parsed.get("choices", [])
+                                if choices:
+                                    delta = choices[0].get("delta", {})
+                                    content = delta.get("content") or delta.get("reasoning_content") or ""
+                                    response_parts.append(content)
+                            except json.JSONDecodeError:
+                                pass
+
+            # Build response_body for DB logging
             response_body = {
                 "id": parsed.get("id", ""),
-                "object": parsed.get("object", ""),
+                "object": "chat.completion",
                 "created": parsed.get("created", 0),
-                "model": parsed.get("model", ""),
-                "choices": [{"delta": {"content": "".join(response_parts)}, "index": 0, "finish_reason": parsed.get("finish_reason", "")}],
+                "model": parsed.get("model", model),
+                "choices": [{"message": {"content": "".join(response_parts)}, "finish_reason": parsed.get("finish_reason", "")}],
                 "usage": usage_data,
             }
-            if "timings" in parsed:
-                response_body["timings"] = parsed["timings"]
             meta["response_body"] = json.dumps(response_body)
-            
-            # Use upstream timings when available (llama.cpp sends these)
+
+            # Use upstream timings when available
             upstream_timings = parsed.get("timings", {})
             if upstream_timings:
                 latency_ms = upstream_timings.get("prompt_ms", 0) + upstream_timings.get("predicted_ms", 0)
-                tps = upstream_timings.get("predicted_per_second")
-                ttft = meta.get("time_to_first_token_ms", upstream_timings.get("prompt_ms"))
+                if tps is None:
+                    tps = upstream_timings.get("predicted_per_second")
             else:
                 latency_ms = (time.monotonic() - start) * 1000
-                ttft = meta.get("time_to_first_token_ms", 0)
-                tps = None
-            
-            # Fallback TPS calculation
+
             if tps is None and latency_ms > 0 and usage_data["output_tokens"] > 0:
                 tps = usage_data["output_tokens"] / (latency_ms / 1000)
-            
-            # Emit final usage-bearing chunk before [DONE] (OpenAI spec)
-            if usage_data["input_tokens"] > 0 or usage_data["output_tokens"] > 0:
-                usage_chunk = {
-                    "id": parsed.get("id", ""),
-                    "object": "chat.completion.chunk",
-                    "created": parsed.get("created", 0),
-                    "model": parsed.get("model", ""),
-                    "choices": [{"index": 0, "delta": {}, "finish_reason": parsed.get("finish_reason", "length")}],
-                    "usage": {
-                        "prompt_tokens": usage_data["input_tokens"],
-                        "completion_tokens": usage_data["output_tokens"],
-                        "prompt_tokens_details": {"cached_tokens": usage_data["cache_read"]} if usage_data["cache_read"] else {},
-                        "total_tokens": usage_data["input_tokens"] + usage_data["output_tokens"],
-                    },
-                }
-                yield f"data: {json.dumps(usage_chunk)}\n\n"
 
             meta.update(
                 input_tokens=usage_data["input_tokens"],
@@ -425,12 +406,11 @@ async def _handle_stream(
                 time_to_first_token_ms=meta.get("time_to_first_token_ms", 0),
                 tokens_per_second=tps,
             )
-            yield f"data: [DONE]\n\n"
         except Exception as e:
             meta["status"] = "error"
             meta["error_message"] = str(e)[:500]
             meta["latency_ms"] = (time.monotonic() - start) * 1000
-            yield f"data: [ERROR: {e}]\n\n"
+            yield json.dumps({"error": str(e)}).encode()
             raise
 
     return stream_generator(), meta
