@@ -303,9 +303,23 @@ async def _handle_stream(
                         break
                     try:
                         parsed = json.loads(data)
-                        chunk_content = parsed.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                        choices = parsed.get("choices", [])
+                        if not choices:
+                            continue
                         
-                        # Build OpenAI-compatible SSE chunk
+                        delta = choices[0].get("delta", {})
+                        chunk_content = delta.get("content") or ""
+                        reasoning_content = delta.get("reasoning_content") or ""
+                        
+                        # Build OpenAI-compatible SSE chunk (pass through reasoning_content)
+                        sse_delta = {
+                            "role": delta.get("role", "assistant"),
+                        }
+                        if chunk_content:
+                            sse_delta["content"] = chunk_content
+                        if reasoning_content:
+                            sse_delta["reasoning_content"] = reasoning_content
+                        
                         sse_chunk = {
                             "id": parsed.get("id", ""),
                             "object": "chat.completion.chunk",
@@ -314,12 +328,9 @@ async def _handle_stream(
                             "choices": [
                                 {
                                     "index": 0,
-                                    "delta": {
-                                        "role": parsed.get("choices", [{}])[0].get("delta", {}).get("role", "assistant"),
-                                        "content": chunk_content
-                                    },
-                                    "logprobs": parsed.get("choices", [{}])[0].get("logprobs"),
-                                    "finish_reason": parsed.get("finish_reason") if chunk_content else None
+                                    "delta": sse_delta,
+                                    "logprobs": choices[0].get("logprobs"),
+                                    "finish_reason": choices[0].get("finish_reason")
                                 }
                             ]
                         }
@@ -332,8 +343,8 @@ async def _handle_stream(
                             if isinstance(cd, dict):
                                 usage_data["cache_read"] = cd.get("cached_tokens", 0)
                         
-                        # Only yield if we have content (to avoid empty chunks)
-                        if chunk_content or response_parts:
+                        # Yield if we have any content (including reasoning)
+                        if chunk_content or reasoning_content or response_parts:
                             response_parts.append(chunk_content)
                             yield f"data: {json.dumps(sse_chunk)}\n\n"
                     except json.JSONDecodeError:
