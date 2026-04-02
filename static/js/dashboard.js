@@ -571,10 +571,11 @@ function gateway() {
             for (let i = 5; i >= 0; i--) {
                 const d = new Date(now);
                 d.setHours(d.getHours() - i);
-                const key = d.getFullYear() + '-' +
-                    String(d.getMonth() + 1).padStart(2, '0') + '-' +
-                    String(d.getDate()).padStart(2, '0') + ' ' +
-                    String(d.getHours()).padStart(2, '0') + ':00';
+                // Build UTC key to match server's strftime('%Y-%m-%d %H:00') output
+                const key = d.getUTCFullYear() + '-' +
+                    String(d.getUTCMonth() + 1).padStart(2, '0') + '-' +
+                    String(d.getUTCDate()).padStart(2, '0') + ' ' +
+                    String(d.getUTCHours()).padStart(2, '0') + ':00';
                 hourMap[key] = { requests: 0, input_tokens: 0, output_tokens: 0, cost: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
             }
             for (const row of data) {
@@ -589,7 +590,8 @@ function gateway() {
             const hours = Object.keys(hourMap).sort();
             const labels = hours.map(h => {
                 const parts = h.split(' ');
-                const d = new Date(parts[0] + 'T' + parts[1]);
+                // Server returns UTC hour strings like "2026-04-02 15:00" — append 'Z' so JS parses as UTC
+                const d = new Date(parts[0] + 'T' + parts[1] + ':00Z');
                 return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' +
                        d.toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
             });
@@ -816,7 +818,8 @@ function gateway() {
             if (diff < 60000) return 'just now';
             if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
             if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
-            return d.toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+            // Use browser's local timezone automatically
+            return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
         },
 
         formatTTFT(ms) {
