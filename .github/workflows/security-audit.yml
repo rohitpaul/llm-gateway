@@ -25,7 +25,7 @@ jobs:
           pip install pip-audit
 
       - name: Run pip-audit
-        run: pip-audit --desc-only || true
+        run: pip-audit --desc-only
         continue-on-error: true
 
       - name: Run Trivy repo scan
