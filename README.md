@@ -148,29 +148,33 @@ providers:
 
 ## Reverse Proxy Configuration
 
-For production deployments, use a reverse proxy (Nginx recommended) in front of LLM Gateway:
+For production deployments, use a reverse proxy with these critical settings:
 
-**Critical Settings**:
-- Disable buffering for SSE streaming
-- Long timeouts (300s+) for LLM requests
-- Large max body size (10M+) for context windows
-- Connection pooling for performance
+### Option 1: Manual Nginx Setup
+See [REVERSE_PROXY.md](REVERSE_PROXY.md) for comprehensive guide.
 
-See [REVERSE_PROXY.md](REVERSE_PROXY.md) for complete configuration guides:
-- Nginx (recommended)
-- Traefik (Docker-native)
-- Caddy (automatic HTTPS)
-- Performance tuning and security hardening
-
-**Quick Nginx Example**:
+**Critical settings for LLM workloads:**
 ```nginx
-location / {
-    proxy_pass http://localhost:4000;
-    proxy_buffering off;  # Critical for streaming
-    proxy_read_timeout 300s;
-    client_max_body_size 10M;
-}
+proxy_buffering off;     # Required for SSE streaming
+proxy_read_timeout 300s;  # LLM requests can be slow
+client_max_body_size 10M; # Large context windows
 ```
+
+### Option 2: Nginx Proxy Manager (Web UI)
+See [REVERSE_PROXY_NPM.md](REVERSE_PROXY_NPM.md) for easy setup with automatic SSL.
+
+**Quick start:**
+```bash
+docker compose -f examples/docker-compose-nginx.yml up -d
+# UI at http://localhost:81 (admin@example.com / changeme)
+```
+
+### Other Options
+- **Traefik** - Docker-native with auto-discovery
+- **Caddy** - Automatic HTTPS with simple config
+- **HAProxy** - Advanced load balancing
+
+See [REVERSE_PROXY.md](REVERSE_PROXY.md) for all configurations.
 
 ## Contributing
 
