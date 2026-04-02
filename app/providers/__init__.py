@@ -359,9 +359,13 @@ async def _handle_stream(
                             ]
                         }
                         
+                        # Capture TTFT on first content-bearing chunk
+                        if (chunk_content or reasoning_content) and meta.get("time_to_first_token_ms") is None:
+                            meta["time_to_first_token_ms"] = (time.monotonic() - start) * 1000
+
                         # Yield if we have any content (including reasoning)
                         if chunk_content or reasoning_content or response_parts:
-                            response_parts.append(chunk_content)
+                            response_parts.append(chunk_content or reasoning_content)
                             yield f"data: {json.dumps(sse_chunk)}\n\n"
                     except json.JSONDecodeError:
                         continue
@@ -394,6 +398,23 @@ async def _handle_stream(
             if tps is None and latency_ms > 0 and usage_data["output_tokens"] > 0:
                 tps = usage_data["output_tokens"] / (latency_ms / 1000)
             
+            # Emit final usage-bearing chunk before [DONE] (OpenAI spec)
+            if usage_data["input_tokens"] > 0 or usage_data["output_tokens"] > 0:
+                usage_chunk = {
+                    "id": parsed.get("id", ""),
+                    "object": "chat.completion.chunk",
+                    "created": parsed.get("created", 0),
+                    "model": parsed.get("model", ""),
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": parsed.get("finish_reason", "length")}],
+                    "usage": {
+                        "prompt_tokens": usage_data["input_tokens"],
+                        "completion_tokens": usage_data["output_tokens"],
+                        "prompt_tokens_details": {"cached_tokens": usage_data["cache_read"]} if usage_data["cache_read"] else {},
+                        "total_tokens": usage_data["input_tokens"] + usage_data["output_tokens"],
+                    },
+                }
+                yield f"data: {json.dumps(usage_chunk)}\n\n"
+
             meta.update(
                 input_tokens=usage_data["input_tokens"],
                 output_tokens=usage_data["output_tokens"],
@@ -401,7 +422,7 @@ async def _handle_stream(
                 cache_write_tokens=0,
                 cost=calculate_cost(model, usage_data["input_tokens"], usage_data["output_tokens"], usage_data["cache_read"], cfg),
                 latency_ms=latency_ms,
-                time_to_first_token_ms=ttft,
+                time_to_first_token_ms=meta.get("time_to_first_token_ms", 0),
                 tokens_per_second=tps,
             )
             yield f"data: [DONE]\n\n"
