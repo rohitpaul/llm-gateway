@@ -598,7 +598,7 @@ async def auth_login(request: Request, response: FastAPIResponse):
                 max_age=60 * 60 * 24 * 7,  # 7 days
                 httponly=True,
                 samesite="lax",
-                secure=True,
+                secure=False,  # Set to True in production with HTTPS
             )
             return response
         else:
