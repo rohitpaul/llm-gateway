@@ -288,6 +288,13 @@ function gateway() {
             } catch {}
         },
 
+        // Helper to update chart data without destroying/recreating (prevents animation reset)
+        _updateChartData(chartInstance, newSeries) {
+            if (chartInstance) {
+                chartInstance.updateSeries(newSeries);
+            }
+        },
+
     async loadDailyStats() {
             // Backwards compat — called from loadAll for refresh
             return this.loadChartData();
@@ -337,174 +344,190 @@ function gateway() {
             // Chart 1: Token Volume (stacked)
             const tokEl = document.getElementById('chartTokens');
             if (tokEl) {
-                if (this.chartInstances.tokens) this.chartInstances.tokens.destroy();
                 const billable = dates.map(d => Math.max(0, (dayMap[d].input_tokens || 0) - (dayMap[d].cache_read_tokens || 0)));
                 const cached = dates.map(d => dayMap[d].cache_read_tokens || 0);
                 const output = dates.map(d => dayMap[d].output_tokens || 0);
                 
-                this.chartInstances.tokens = new ApexCharts(tokEl, {
-                    chart: {
-                        type: 'bar',
-                        height: '100%',
-                        background: 'transparent',
-                        toolbar: { show: false },
-                        fontFamily: 'inherit',
-                        stacked: true,
-                        animations: { enabled: false },
-                    },
-                    series: [
-                        { name: 'Fresh Input', data: billable },
-                        { name: 'Cached', data: cached },
-                        { name: 'Output', data: output },
-                    ],
-                    colors: ['#3b82f6', '#10b981', '#8b5cf6'],
-                    plotOptions: { 
-                        bar: { 
-                            borderRadius: 4, 
-                            columnWidth: '65%',
-                            distributed: false
-                        } 
-                    },
-                    dataLabels: {
-                        enabled: true,
-                        formatter: (val) => val > 500 ? (val/1000).toFixed(1) + 'K' : val,
-                        style: { fontSize: '9px', colors: ['#fff', '#fff', '#fff'] }
-                    },
-                    xaxis: {
-                        categories: labels,
-                        axisBorder: { show: false },
-                        axisTicks: { show: false },
-                        labels: { style: { color: '#9ca3af', fontSize: '9px' } },
-                    },
-                    yaxis: {
-                        labels: { 
-                            style: { color: '#9ca3af', fontSize: '9px' },
-                            formatter: (val) => (val/1000).toFixed(1) + 'K'
+                const newSeries = [
+                    { name: 'Fresh Input', data: billable },
+                    { name: 'Cached', data: cached },
+                    { name: 'Output', data: output },
+                ];
+                
+                if (this.chartInstances.tokens) {
+                    // Update existing chart without destroying (prevents animation reset)
+                    this.chartInstances.tokens.updateSeries(newSeries);
+                } else {
+                    // Create new chart
+                    this.chartInstances.tokens = new ApexCharts(tokEl, {
+                        chart: {
+                            type: 'bar',
+                            height: '100%',
+                            background: 'transparent',
+                            toolbar: { show: false },
+                            fontFamily: 'inherit',
+                            stacked: true,
+                            animations: { enabled: false },
                         },
-                    },
-                    grid: { borderColor: 'rgba(255,255,255,0.08)', strokeDashArray: 3 },
-                    legend: { show: false },
-                    tooltip: {
-                        theme: 'dark',
-                        y: {
-                            formatter: (val) => val.toLocaleString() + ' tokens'
-                        }
-                    },
-                    theme: { mode: 'dark' },
-                });
-                this.chartInstances.tokens.render();
+                        series: newSeries,
+                        colors: ['#3b82f6', '#10b981', '#8b5cf6'],
+                        plotOptions: { 
+                            bar: { 
+                                borderRadius: 4, 
+                                columnWidth: '65%',
+                                distributed: false
+                            } 
+                        },
+                        dataLabels: {
+                            enabled: true,
+                            formatter: (val) => val > 500 ? (val/1000).toFixed(1) + 'K' : val,
+                            style: { fontSize: '9px', colors: ['#fff', '#fff', '#fff'] }
+                        },
+                        xaxis: {
+                            categories: labels,
+                            axisBorder: { show: false },
+                            axisTicks: { show: false },
+                            labels: { style: { color: '#9ca3af', fontSize: '9px' } },
+                        },
+                        yaxis: {
+                            labels: { 
+                                style: { color: '#9ca3af', fontSize: '9px' },
+                                formatter: (val) => (val/1000).toFixed(1) + 'K'
+                            },
+                        },
+                        grid: { borderColor: 'rgba(255,255,255,0.08)', strokeDashArray: 3 },
+                        legend: { show: false },
+                        tooltip: {
+                            theme: 'dark',
+                            y: {
+                                formatter: (val) => val.toLocaleString() + ' tokens'
+                            }
+                        },
+                        theme: { mode: 'dark' },
+                    });
+                    this.chartInstances.tokens.render();
+                }
             }
 
             // Chart 2: Cost over time
             const costEl = document.getElementById('chartCost');
             if (costEl) {
-                if (this.chartInstances.cost) this.chartInstances.cost.destroy();
                 const costData = dates.map(d => dayMap[d].cost);
-                this.chartInstances.cost = new ApexCharts(costEl, {
-                    chart: {
-                        type: 'area',
-                        height: '100%',
-                        background: 'transparent',
-                        toolbar: { show: false },
-                        fontFamily: 'inherit',
-                        animations: { enabled: false },
-                    },
-                    series: [{ name: 'Cost', data: costData }],
-                    colors: ['#f43f5e'],
-                    fill: {
-                        type: 'gradient',
-                        gradient: {
-                            shadeIntensity: 1,
-                            opacityFrom: 0.4,
-                            opacityTo: 0.05,
-                            stops: [0, 90, 100]
+                const newCostSeries = [{ name: 'Cost', data: costData }];
+                
+                if (this.chartInstances.cost) {
+                    this.chartInstances.cost.updateSeries(newCostSeries);
+                } else {
+                    this.chartInstances.cost = new ApexCharts(costEl, {
+                        chart: {
+                            type: 'area',
+                            height: '100%',
+                            background: 'transparent',
+                            toolbar: { show: false },
+                            fontFamily: 'inherit',
+                            animations: { enabled: false },
                         },
-                    },
-                    stroke: { width: 2, curve: 'smooth' },
-                    dataLabels: {
-                        enabled: true,
-                        enabledOnSeries: ['Cost'],
-                        formatter: (val) => '$' + val.toFixed(4),
-                        style: { fontSize: '9px', colors: ['#fff'] }
-                    },
-                    xaxis: {
-                        categories: labels,
-                        axisBorder: { show: false },
-                        axisTicks: { show: false },
-                        labels: { style: { color: '#9ca3af', fontSize: '9px' } },
-                    },
-                    yaxis: {
-                        labels: { 
-                            style: { color: '#9ca3af', fontSize: '9px' },
-                            formatter: v => '$' + v.toFixed(4)
+                        series: newCostSeries,
+                        colors: ['#f43f5e'],
+                        fill: {
+                            type: 'gradient',
+                            gradient: {
+                                shadeIntensity: 1,
+                                opacityFrom: 0.4,
+                                opacityTo: 0.05,
+                                stops: [0, 90, 100]
+                            },
                         },
-                    },
-                    grid: { borderColor: 'rgba(255,255,255,0.08)', strokeDashArray: 3 },
-                    legend: { show: false },
-                    tooltip: {
-                        theme: 'dark',
-                        y: { formatter: v => '$' + v.toFixed(4) }
-                    },
-                    theme: { mode: 'dark' },
-                });
-                this.chartInstances.cost.render();
+                        stroke: { width: 2, curve: 'smooth' },
+                        dataLabels: {
+                            enabled: true,
+                            enabledOnSeries: ['Cost'],
+                            formatter: (val) => '$' + val.toFixed(4),
+                            style: { fontSize: '9px', colors: ['#fff'] }
+                        },
+                        xaxis: {
+                            categories: labels,
+                            axisBorder: { show: false },
+                            axisTicks: { show: false },
+                            labels: { style: { color: '#9ca3af', fontSize: '9px' } },
+                        },
+                        yaxis: {
+                            labels: { 
+                                style: { color: '#9ca3af', fontSize: '9px' },
+                                formatter: v => '$' + v.toFixed(4)
+                            },
+                        },
+                        grid: { borderColor: 'rgba(255,255,255,0.08)', strokeDashArray: 3 },
+                        legend: { show: false },
+                        tooltip: {
+                            theme: 'dark',
+                            y: { formatter: v => '$' + v.toFixed(4) }
+                        },
+                        theme: { mode: 'dark' },
+                    });
+                    this.chartInstances.cost.render();
+                }
             }
 
             // Chart 3: Request Volume
             const reqEl = document.getElementById('chartRequests');
             if (reqEl) {
-                if (this.chartInstances.requests) this.chartInstances.requests.destroy();
                 const reqData = dates.map(d => dayMap[d].requests);
-                this.chartInstances.requests = new ApexCharts(reqEl, {
-                    chart: {
-                        type: 'bar',
-                        height: '100%',
-                        background: 'transparent',
-                        toolbar: { show: false },
-                        fontFamily: 'inherit',
-                        animations: { enabled: false },
-                    },
-                    series: [{ name: 'Requests', data: reqData }],
-                    colors: ['#f59e0b'],
-                    plotOptions: { 
-                        bar: { 
-                            borderRadius: 4, 
-                            columnWidth: '65%',
-                            barHeight: '100%'
-                        } 
-                    },
-                    dataLabels: {
-                        enabled: true,
-                        formatter: (val) => val,
-                        style: { fontSize: '9px', colors: ['#fff'] }
-                    },
-                    xaxis: {
-                        categories: labels,
-                        axisBorder: { show: false },
-                        axisTicks: { show: false },
-                        labels: { style: { color: '#9ca3af', fontSize: '9px' } },
-                    },
-                    yaxis: {
-                        labels: { 
-                            style: { color: '#9ca3af', fontSize: '9px' },
-                            formatter: (val) => Math.round(val)
+                const newReqSeries = [{ name: 'Requests', data: reqData }];
+                
+                if (this.chartInstances.requests) {
+                    this.chartInstances.requests.updateSeries(newReqSeries);
+                } else {
+                    this.chartInstances.requests = new ApexCharts(reqEl, {
+                        chart: {
+                            type: 'bar',
+                            height: '100%',
+                            background: 'transparent',
+                            toolbar: { show: false },
+                            fontFamily: 'inherit',
+                            animations: { enabled: false },
                         },
-                    },
-                    grid: { borderColor: 'rgba(255,255,255,0.08)', strokeDashArray: 3 },
-                    legend: { show: false },
-                    tooltip: {
-                        theme: 'dark',
-                        y: { formatter: (val) => val.toLocaleString() + ' requests' }
-                    },
-                    theme: { mode: 'dark' },
-                });
-                this.chartInstances.requests.render();
+                        series: newReqSeries,
+                        colors: ['#f59e0b'],
+                        plotOptions: { 
+                            bar: { 
+                                borderRadius: 4, 
+                                columnWidth: '65%',
+                                barHeight: '100%'
+                            } 
+                        },
+                        dataLabels: {
+                            enabled: true,
+                            formatter: (val) => val,
+                            style: { fontSize: '9px', colors: ['#fff'] }
+                        },
+                        xaxis: {
+                            categories: labels,
+                            axisBorder: { show: false },
+                            axisTicks: { show: false },
+                            labels: { style: { color: '#9ca3af', fontSize: '9px' } },
+                        },
+                        yaxis: {
+                            labels: { 
+                                style: { color: '#9ca3af', fontSize: '9px' },
+                                formatter: (val) => Math.round(val)
+                            },
+                        },
+                        grid: { borderColor: 'rgba(255,255,255,0.08)', strokeDashArray: 3 },
+                        legend: { show: false },
+                        tooltip: {
+                            theme: 'dark',
+                            y: { formatter: (val) => val.toLocaleString() + ' requests' }
+                        },
+                        theme: { mode: 'dark' },
+                    });
+                    this.chartInstances.requests.render();
+                }
             }
 
             // Chart 4: Token Distribution (Donut)
             const distEl = document.getElementById('chartDistribution');
             if (distEl) {
-                if (this.chartInstances.distribution) this.chartInstances.distribution.destroy();
                 // Calculate totals
                 let totalInput = 0, totalCached = 0, totalOutput = 0, totalRequests = 0, totalCost = 0;
                 dates.forEach(d => {
@@ -516,6 +539,7 @@ function gateway() {
                 });
                 const total = totalInput + totalOutput;
                 const fresh = totalInput - totalCached;
+                const newSeries = [fresh, totalCached, totalOutput];
                 
                 // Update summary stats
                 this.chartSummary = {
@@ -525,66 +549,68 @@ function gateway() {
                     cache_rate: totalInput > 0 ? (totalCached / totalInput * 100) : 0
                 };
                 
-                this.chartInstances.distribution = new ApexCharts(distEl, {
-                    chart: {
-                        type: 'donut',
-                        height: '100%',
-                        background: 'transparent',
-                        toolbar: { show: false },
-                        fontFamily: 'inherit',
-                        animations: { enabled: false },
-                    },
-                    series: [fresh, totalCached, totalOutput],
-                    labels: ['Fresh', 'Cached', 'Output'],
-                    colors: ['#3b82f6', '#10b981', '#8b5cf6'],
-                    dataLabels: {
-                        enabled: true,
-                        formatter: (val, opts) => {
-                            const pct = (val / total * 100).toFixed(1);
-                            return pct > 5 ? pct + '%' : '';
+                if (this.chartInstances.distribution) {
+                    this.chartInstances.distribution.updateSeries(newSeries);
+                } else {
+                    this.chartInstances.distribution = new ApexCharts(distEl, {
+                        chart: {
+                            type: 'donut',
+                            height: '100%',
+                            background: 'transparent',
+                            toolbar: { show: false },
+                            fontFamily: 'inherit',
+                            animations: { enabled: false },
                         },
-                        style: { fontSize: '10px', colors: ['#fff', '#fff', '#fff'] },
-                    },
-                    legend: {
-                        show: false,
-                    },
-                    tooltip: {
-                        theme: 'dark',
-                        y: {
-                            formatter: (val) => {
-                                return val.toLocaleString() + ' tokens (' + (val/total*100).toFixed(1) + '%)';
+                        series: newSeries,
+                        labels: ['Fresh', 'Cached', 'Output'],
+                        colors: ['#3b82f6', '#10b981', '#8b5cf6'],
+                        dataLabels: {
+                            enabled: true,
+                            formatter: (val, opts) => {
+                                const pct = (val / total * 100).toFixed(1);
+                                return pct > 5 ? pct + '%' : '';
+                            },
+                            style: { fontSize: '10px', colors: ['#fff', '#fff', '#fff'] },
+                        },
+                        legend: { show: false },
+                        tooltip: {
+                            theme: 'dark',
+                            y: {
+                                formatter: (val) => {
+                                    return val.toLocaleString() + ' tokens (' + (val/total*100).toFixed(1) + '%)';
+                                }
                             }
-                        }
-                    },
-                    theme: { mode: 'dark' },
-                    plotOptions: {
-                        pie: {
-                            donut: {
-                                size: '70%',
-                                labels: {
-                                    show: true,
-                                    showAlways: true,
-                                    name: { show: true, fontSize: '11px', color: '#9ca3af' },
-                                    value: {
+                        },
+                        theme: { mode: 'dark' },
+                        plotOptions: {
+                            pie: {
+                                donut: {
+                                    size: '70%',
+                                    labels: {
                                         show: true,
-                                        fontSize: '16px',
-                                        fontWeight: 600,
-                                        color: '#f3f4f6',
-                                        formatter: (val) => (val/1000).toFixed(1) + 'K'
-                                    },
-                                    total: {
-                                        show: true,
-                                        label: 'Total',
-                                        fontSize: '11px',
-                                        color: '#9ca3af',
-                                        formatter: () => (total/1000).toFixed(1) + 'K'
+                                        showAlways: true,
+                                        name: { show: true, fontSize: '11px', color: '#9ca3af' },
+                                        value: {
+                                            show: true,
+                                            fontSize: '16px',
+                                            fontWeight: 600,
+                                            color: '#f3f4f6',
+                                            formatter: (val) => (val/1000).toFixed(1) + 'K'
+                                        },
+                                        total: {
+                                            show: true,
+                                            label: 'Total',
+                                            fontSize: '11px',
+                                            color: '#9ca3af',
+                                            formatter: () => (total/1000).toFixed(1) + 'K'
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                });
-                this.chartInstances.distribution.render();
+                    });
+                    this.chartInstances.distribution.render();
+                }
             }
         },
 
@@ -641,31 +667,34 @@ function gateway() {
             // Chart 1: Token Volume (stacked)
             const tokEl = document.getElementById('chartTokens');
             if (tokEl) {
-                if (this.chartInstances.tokens) this.chartInstances.tokens.destroy();
                 const billable = hours.map(h => Math.max(0, (hourMap[h].input_tokens || 0) - (hourMap[h].cache_read_tokens || 0)));
                 const cached = hours.map(h => hourMap[h].cache_read_tokens || 0);
                 const output = hours.map(h => hourMap[h].output_tokens || 0);
+                const newSeries = [
+                    { name: 'Fresh Input', data: billable },
+                    { name: 'Cached', data: cached },
+                    { name: 'Output', data: output },
+                ];
                 
-                this.chartInstances.tokens = new ApexCharts(tokEl, {
-                    chart: { ...baseChart, type: 'bar', stacked: true },
-                    series: [
-                        { name: 'Fresh Input', data: billable },
-                        { name: 'Cached', data: cached },
-                        { name: 'Output', data: output },
-                    ],
-                    colors: ['#3b82f6', '#10b981', '#8b5cf6'],
-                    plotOptions: { 
-                        bar: { 
-                            borderRadius: 4, 
-                            columnWidth: '65%',
-                            distributed: false
-                        } 
-                    },
-                    dataLabels: {
-                        enabled: true,
-                        formatter: (val) => val > 500 ? (val/1000).toFixed(1) + 'K' : val,
-                        style: { fontSize: '9px', colors: ['#fff', '#fff', '#fff'] }
-                    },
+                if (this.chartInstances.tokens) {
+                    this.chartInstances.tokens.updateSeries(newSeries);
+                } else {
+                    this.chartInstances.tokens = new ApexCharts(tokEl, {
+                        chart: { ...baseChart, type: 'bar', stacked: true },
+                        series: newSeries,
+                        colors: ['#3b82f6', '#10b981', '#8b5cf6'],
+                        plotOptions: { 
+                            bar: { 
+                                borderRadius: 4, 
+                                columnWidth: '65%',
+                                distributed: false
+                            } 
+                        },
+                        dataLabels: {
+                            enabled: true,
+                            formatter: (val) => val > 500 ? (val/1000).toFixed(1) + 'K' : val,
+                            style: { fontSize: '9px', colors: ['#fff', '#fff', '#fff'] }
+                        },
                     xaxis: baseXaxis,
                     yaxis: {
                         labels: { 
@@ -681,88 +710,98 @@ function gateway() {
                     },
                     theme: baseTheme,
                 });
-                this.chartInstances.tokens.render();
+                    this.chartInstances.tokens.render();
+                }
             }
 
             // Chart 2: Cost over time
             const costEl = document.getElementById('chartCost');
             if (costEl) {
-                if (this.chartInstances.cost) this.chartInstances.cost.destroy();
                 const costData = hours.map(h => hourMap[h].cost);
-                this.chartInstances.cost = new ApexCharts(costEl, {
-                    chart: { ...baseChart, type: 'area' },
-                    series: [{ name: 'Cost', data: costData }],
-                    colors: ['#f43f5e'],
-                    fill: {
-                        type: 'gradient',
-                        gradient: {
-                            shadeIntensity: 1,
-                            opacityFrom: 0.4,
-                            opacityTo: 0.05,
-                            stops: [0, 90, 100]
+                const newCostSeries = [{ name: 'Cost', data: costData }];
+                
+                if (this.chartInstances.cost) {
+                    this.chartInstances.cost.updateSeries(newCostSeries);
+                } else {
+                    this.chartInstances.cost = new ApexCharts(costEl, {
+                        chart: { ...baseChart, type: 'area' },
+                        series: newCostSeries,
+                        colors: ['#f43f5e'],
+                        fill: {
+                            type: 'gradient',
+                            gradient: {
+                                shadeIntensity: 1,
+                                opacityFrom: 0.4,
+                                opacityTo: 0.05,
+                                stops: [0, 90, 100]
+                            },
                         },
-                    },
-                    stroke: { width: 2, curve: 'smooth' },
-                    dataLabels: {
-                        enabled: true,
-                        formatter: (val) => '$' + val.toFixed(4),
-                        style: { fontSize: '9px', colors: ['#fff'] }
-                    },
-                    xaxis: baseXaxis,
-                    yaxis: {
-                        labels: { 
-                            style: { color: '#9ca3af', fontSize: '9px' },
-                            formatter: v => '$' + v.toFixed(4)
+                        stroke: { width: 2, curve: 'smooth' },
+                        dataLabels: {
+                            enabled: true,
+                            formatter: (val) => '$' + val.toFixed(4),
+                            style: { fontSize: '9px', colors: ['#fff'] }
                         },
-                    },
-                    grid: baseGrid,
-                    legend: { show: false },
-                    tooltip: { theme: 'dark', y: { formatter: v => '$' + v.toFixed(4) } },
-                    theme: baseTheme,
-                });
-                this.chartInstances.cost.render();
+                        xaxis: baseXaxis,
+                        yaxis: {
+                            labels: { 
+                                style: { color: '#9ca3af', fontSize: '9px' },
+                                formatter: v => '$' + v.toFixed(4)
+                            },
+                        },
+                        grid: baseGrid,
+                        legend: { show: false },
+                        tooltip: { theme: 'dark', y: { formatter: v => '$' + v.toFixed(4) } },
+                        theme: baseTheme,
+                    });
+                    this.chartInstances.cost.render();
+                }
             }
 
             // Chart 3: Request Volume
             const reqEl = document.getElementById('chartRequests');
             if (reqEl) {
-                if (this.chartInstances.requests) this.chartInstances.requests.destroy();
                 const reqData = hours.map(h => hourMap[h].requests);
-                this.chartInstances.requests = new ApexCharts(reqEl, {
-                    chart: { ...baseChart, type: 'bar' },
-                    series: [{ name: 'Requests', data: reqData }],
-                    colors: ['#f59e0b'],
-                    plotOptions: { 
-                        bar: { 
-                            borderRadius: 4, 
-                            columnWidth: '65%',
-                            barHeight: '100%'
-                        } 
-                    },
-                    dataLabels: {
-                        enabled: true,
-                        formatter: (val) => val,
-                        style: { fontSize: '9px', colors: ['#fff'] }
-                    },
-                    xaxis: baseXaxis,
-                    yaxis: {
-                        labels: { 
-                            style: { color: '#9ca3af', fontSize: '9px' },
-                            formatter: (val) => Math.round(val)
+                const newReqSeries = [{ name: 'Requests', data: reqData }];
+                
+                if (this.chartInstances.requests) {
+                    this.chartInstances.requests.updateSeries(newReqSeries);
+                } else {
+                    this.chartInstances.requests = new ApexCharts(reqEl, {
+                        chart: { ...baseChart, type: 'bar' },
+                        series: newReqSeries,
+                        colors: ['#f59e0b'],
+                        plotOptions: { 
+                            bar: { 
+                                borderRadius: 4, 
+                                columnWidth: '65%',
+                                barHeight: '100%'
+                            } 
                         },
-                    },
-                    grid: baseGrid,
-                    legend: { show: false },
-                    tooltip: { theme: 'dark', y: { formatter: (val) => val.toLocaleString() + ' requests' } },
-                    theme: baseTheme,
-                });
-                this.chartInstances.requests.render();
+                        dataLabels: {
+                            enabled: true,
+                            formatter: (val) => val,
+                            style: { fontSize: '9px', colors: ['#fff'] }
+                        },
+                        xaxis: baseXaxis,
+                        yaxis: {
+                            labels: { 
+                                style: { color: '#9ca3af', fontSize: '9px' },
+                                formatter: (val) => Math.round(val)
+                            },
+                        },
+                        grid: baseGrid,
+                        legend: { show: false },
+                        tooltip: { theme: 'dark', y: { formatter: (val) => val.toLocaleString() + ' requests' } },
+                        theme: baseTheme,
+                    });
+                    this.chartInstances.requests.render();
+                }
             }
 
             // Chart 4: Distribution (Donut)
             const distEl = document.getElementById('chartDistribution');
             if (distEl) {
-                if (this.chartInstances.distribution) this.chartInstances.distribution.destroy();
                 let totalInput = 0, totalCached = 0, totalOutput = 0, totalRequests = 0, totalCost = 0;
                 hours.forEach(h => {
                     totalInput += hourMap[h].input_tokens || 0;
@@ -773,6 +812,7 @@ function gateway() {
                 });
                 const total = totalInput + totalOutput;
                 const fresh = totalInput - totalCached;
+                const newSeries = [fresh, totalCached, totalOutput];
                 
                 // Update summary
                 this.chartSummary = {
@@ -782,50 +822,54 @@ function gateway() {
                     cache_rate: totalInput > 0 ? (totalCached / totalInput * 100) : 0
                 };
                 
-                this.chartInstances.distribution = new ApexCharts(distEl, {
-                    chart: { ...baseChart, type: 'donut' },
-                    series: [fresh, totalCached, totalOutput],
-                    labels: ['Fresh', 'Cached', 'Output'],
-                    colors: ['#3b82f6', '#10b981', '#8b5cf6'],
-                    dataLabels: {
-                        enabled: true,
-                        formatter: (val) => {
-                            const pct = (val / total * 100).toFixed(1);
-                            return pct > 5 ? pct + '%' : '';
+                if (this.chartInstances.distribution) {
+                    this.chartInstances.distribution.updateSeries(newSeries);
+                } else {
+                    this.chartInstances.distribution = new ApexCharts(distEl, {
+                        chart: { ...baseChart, type: 'donut' },
+                        series: newSeries,
+                        labels: ['Fresh', 'Cached', 'Output'],
+                        colors: ['#3b82f6', '#10b981', '#8b5cf6'],
+                        dataLabels: {
+                            enabled: true,
+                            formatter: (val) => {
+                                const pct = (val / total * 100).toFixed(1);
+                                return pct > 5 ? pct + '%' : '';
+                            },
+                            style: { fontSize: '10px', colors: ['#fff', '#fff', '#fff'] },
                         },
-                        style: { fontSize: '10px', colors: ['#fff', '#fff', '#fff'] },
-                    },
-                    legend: { show: false },
-                    tooltip: { theme: 'dark', y: { formatter: (val) => val.toLocaleString() + ' tokens' } },
-                    theme: baseTheme,
-                    plotOptions: {
-                        pie: {
-                            donut: {
-                                size: '70%',
-                                labels: {
-                                    show: true,
-                                    showAlways: true,
-                                    name: { show: true, fontSize: '11px', color: '#9ca3af' },
-                                    value: {
+                        legend: { show: false },
+                        tooltip: { theme: 'dark', y: { formatter: (val) => val.toLocaleString() + ' tokens' } },
+                        theme: baseTheme,
+                        plotOptions: {
+                            pie: {
+                                donut: {
+                                    size: '70%',
+                                    labels: {
                                         show: true,
-                                        fontSize: '16px',
-                                        fontWeight: 600,
-                                        color: '#f3f4f6',
-                                        formatter: (val) => (val/1000).toFixed(1) + 'K'
-                                    },
-                                    total: {
-                                        show: true,
-                                        label: 'Total',
-                                        fontSize: '11px',
-                                        color: '#9ca3af',
-                                        formatter: () => (total/1000).toFixed(1) + 'K'
+                                        showAlways: true,
+                                        name: { show: true, fontSize: '11px', color: '#9ca3af' },
+                                        value: {
+                                            show: true,
+                                            fontSize: '16px',
+                                            fontWeight: 600,
+                                            color: '#f3f4f6',
+                                            formatter: (val) => (val/1000).toFixed(1) + 'K'
+                                        },
+                                        total: {
+                                            show: true,
+                                            label: 'Total',
+                                            fontSize: '11px',
+                                            color: '#9ca3af',
+                                            formatter: () => (total/1000).toFixed(1) + 'K'
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                });
-                this.chartInstances.distribution.render();
+                    });
+                    this.chartInstances.distribution.render();
+                }
             }
         },
 
