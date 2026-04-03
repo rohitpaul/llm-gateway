@@ -83,7 +83,7 @@ function gateway() {
                 localStorage.removeItem('gateway_admin_key');
                 this.adminKey = '';
             }
-            // Not authenticated — focus the login input after Alpine renders
+            // Not authenticated - focus the login input after Alpine renders
             this.$nextTick(() => {
                 if (this.$refs.loginInput) this.$refs.loginInput.focus();
             });
@@ -355,7 +355,7 @@ function gateway() {
         },
 
     async loadDailyStats() {
-            // Backwards compat — called from loadAll for refresh
+            // Backwards compat - called from loadAll for refresh
             return this.loadChartData();
         },
 
@@ -709,7 +709,7 @@ function gateway() {
             const hours = Object.keys(hourMap).sort();
             const labels = hours.map(h => {
                 const parts = h.split(' ');
-                // Server returns UTC hour strings like "2026-04-02 15:00" — append 'Z' so JS parses as UTC
+                // Server returns UTC hour strings like "2026-04-02 15:00" - append 'Z' so JS parses as UTC
                 const d = new Date(parts[0] + 'T' + parts[1] + ':00Z');
                 return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' +
                        d.toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
@@ -1075,7 +1075,7 @@ function gateway() {
 
         formatTime(iso) {
             if (!iso) return '';
-            // Server stores UTC timestamps without Z — append it
+            // Server stores UTC timestamps without Z - append it
             const d = new Date(iso.includes('Z') || iso.includes('+') ? iso : iso + 'Z');
             const now = new Date();
             const diff = now - d;
@@ -1087,13 +1087,13 @@ function gateway() {
         },
 
         formatTTFT(ms) {
-            if (ms == null) return '—';
+            if (ms == null) return '-';
             if (ms >= 1000) return (ms / 1000).toFixed(1) + 's';
             return ms.toFixed(0) + 'ms';
         },
 
         formatTPS(tps) {
-            if (tps == null) return '—';
+            if (tps == null) return '-';
             return tps.toFixed(1) + ' tok/s';
         },
 

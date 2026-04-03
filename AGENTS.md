@@ -2,6 +2,15 @@
 
 Guidelines for AI coding agents working in the LLM Gateway codebase.
 
+## Key Directives
+
+1. **Never commit secrets** — Use env vars, never hardcode API keys
+2. **Always type hints** — Use Python 3.10+ union syntax (`int | None`)
+3. **Async-first** — All I/O must be async, use `async with` for clients
+4. **Error handling** — Use `HTTPException` for HTTP errors, catch specific exceptions
+5. **Tests** — Place in `tests/`, name `test_<module>.py`, use `pytest-asyncio`
+6. **Lint before commit** — Run `ruff format && ruff check && mypy`
+
 ## Project Overview
 
 Lightweight LLM proxy with virtual API keys, multi-provider support, and usage tracking.
@@ -13,11 +22,8 @@ Lightweight LLM proxy with virtual API keys, multi-provider support, and usage t
 ### Running the Server
 
 ```bash
-# Local development
-python -m app.server
-
-# Docker
-docker compose up -d
+python -m app.server              # Local development
+docker compose up -d              # Docker
 docker compose logs -f llm-gateway
 ```
 
@@ -25,7 +31,7 @@ docker compose logs -f llm-gateway
 
 ```bash
 pip install -e .
-# Or: pip install fastapi[standard] uvicorn[standard] httpx aiosqlite pyyaml python-dotenv pydantic
+# pip install fastapi[standard] uvicorn[standard] httpx aiosqlite pyyaml python-dotenv pydantic
 ```
 
 ### Linting and Formatting
@@ -36,8 +42,6 @@ ruff format app/ && ruff check app/ && mypy app/ --ignore-missing-imports
 ```
 
 ### Testing
-
-No test suite yet. When adding tests:
 
 ```bash
 pip install pytest pytest-asyncio pytest-cov
@@ -50,73 +54,56 @@ pytest --cov=app --cov-report=html        # Run with coverage
 
 ### Imports
 
-Group in order: future annotations → stdlib → third-party → local. Always use `from __future__ import annotations` first.
+Group: future annotations → stdlib → third-party → local. Always use `from __future__ import annotations`.
 
 ```python
 from __future__ import annotations
-
 import hashlib
-import logging
 from typing import Any
-
 import httpx
 from fastapi import FastAPI, Request, HTTPException
-
 from app import config
 from app.database import Database
 ```
 
-- Use absolute imports for local modules (`from app import config`)
-- Import specific names (`from fastapi import HTTPException`)
-
 ### Type Hints
 
-Use Python 3.10+ union syntax. Always type parameters and return values.
+Use Python 3.10+ union syntax. Type parameters and returns.
 
 ```python
 def create_key(self, name: str, key_hash: str, token_limit: int | None = None) -> int:
-    ...
-
-async def get_stats(self, model: str | None = None) -> dict[str, Any]:
     ...
 ```
 
 ### Naming Conventions
 
-- Functions/Variables: `snake_case` (`create_key`, `key_hash`)
-- Classes: `PascalCase` (`Database`, `VirtualKey`)
-- Constants: `UPPER_SNAKE_CASE` (`MAX_BODY_SIZE`)
-- Private functions: prefix with `_` (`_build_headers`)
+- Functions/Variables: `snake_case`
+- Classes: `PascalCase`
+- Constants: `UPPER_SNAKE_CASE`
+- Private: prefix with `_`
 
 ### Error Handling
 
-Use `HTTPException` for HTTP errors. Log errors with context. Catch specific exceptions.
+Use `HTTPException` for HTTP errors. Log with context. Catch specific exceptions.
 
 ```python
-async def verify_key(key_hash: str) -> dict[str, Any]:
-    key_info = await db.validate_key(key_hash)
-    if not key_info:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    return key_info
+if not key_info:
+    raise HTTPException(status_code=401, detail="Invalid API key")
 
 try:
     response = await proxy_chat_completions(body, provider, config)
 except httpx.HTTPStatusError as e:
-    logger.error("Upstream HTTP %d error: provider=%s model=%s — %s",
-                 e.response.status_code, provider, model, str(e)[:200])
+    logger.error("Upstream HTTP %d error: %s", e.response.status_code, str(e)[:200])
     raise HTTPException(status_code=502, detail=f"Upstream error: {str(e)[:200]}")
 ```
 
 ### Async/Await
 
-All I/O operations must be async. Use `async with` for context managers.
+All I/O must be async. Use `async with` for context managers.
 
 ```python
 async with httpx.AsyncClient(timeout=timeout) as client:
     response = await client.post(url, headers=headers, json=body)
-
-async for chunk in response.aiter_bytes():
-    yield chunk
 ```
 
 ### Documentation
@@ -137,37 +124,19 @@ Group related functions with comment headers. Keep functions < 50 lines.
 # ---------------------------------------------------------------------------
 # Auth middleware
 # ---------------------------------------------------------------------------
-
 async def verify_virtual_key(request: Request) -> dict:
     ...
 ```
 
 ### Database Patterns
 
-Use `Database` class methods. Always use async. Handle `None` returns.
+Use `Database` class methods. Always async. Handle `None` returns.
 
 ```python
 key_info = await db.validate_key(key_hash)
 if not key_info:
     raise HTTPException(status_code=401, detail="Invalid API key")
 ```
-
-### FastAPI Patterns
-
-Use dependency injection for auth. Return dicts or Response objects.
-
-```python
-@app.get("/api/stats/summary")
-async def get_summary(_: dict = Depends(verify_admin)) -> dict:
-    return await db.get_summary_stats()
-```
-
-### Configuration
-
-- Environment variables → `.env` file
-- API keys → env vars in `config.py`
-- Model/provider routing → `config.yaml`
-- Never hardcode secrets
 
 ### Logging
 
@@ -177,18 +146,14 @@ Use structured logging with context.
 logger = logging.getLogger("llm-gateway")
 logger.info("Request completed: model=%s provider=%s latency=%.2fms", model, provider, latency)
 logger.error("Database error: %s", str(e))
-logger.exception("Unexpected error")  # Includes stack trace
+logger.exception("Unexpected error")
 ```
 
 ### Testing Conventions
 
-Place tests in `tests/`. Name files `test_<module>.py`. Use `pytest-asyncio` for async.
+Place tests in `tests/`. Name files `test_<module>.py`. Use `pytest-asyncio`.
 
 ```python
-# tests/test_database.py
-import pytest
-from app.database import Database
-
 @pytest.fixture
 async def db():
     database = Database(":memory:")
@@ -207,9 +172,9 @@ async def test_create_key(db):
 ### Adding a New Provider
 
 1. Add to `PROVIDER_BASE_URLS` in `app/config.py`
-2. Add env var mapping in `get_provider_api_key()` in `app/config.py`
+2. Add env var mapping in `get_provider_api_key()`
 3. Add header logic in `_build_headers()` in `app/providers/__init__.py`
-4. Add pricing to `PRICING` dict in `app/providers/__init__.py`
+4. Add pricing to `PRICING` dict
 
 ### Adding a New Endpoint
 
@@ -232,3 +197,7 @@ async def test_create_key(db):
 - Request/response bodies truncated at 100KB
 - Default retention: 7 days
 - Admin key mandatory (server exits if unset)
+
+## Cursor Rules & Copilot Instructions
+
+No Cursor rules (`.cursor/rules/` or `.cursorrules`) or Copilot rules (`.github/copilot-instructions.md`) exist in this repository.
