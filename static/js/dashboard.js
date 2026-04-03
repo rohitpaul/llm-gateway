@@ -426,6 +426,14 @@ function gateway() {
                 if (this.chartInstances.tokens) {
                     // Update existing chart without destroying (prevents animation reset)
                     this.chartInstances.tokens.updateSeries(newSeries);
+                    this.chartInstances.tokens.updateOptions({
+                        dataLabels: {
+                            enabled: true,
+                            formatter: (val) => val > 500 ? (val/1000).toFixed(1) + 'K' : val,
+                            style: { fontSize: '9px', colors: ['#fff', '#fff', '#fff'] }
+                        },
+                        xaxis: { categories: labels }
+                    });
                 } else {
                     // Create new chart
                     this.chartInstances.tokens = new ApexCharts(tokEl, {
@@ -486,6 +494,15 @@ function gateway() {
                 
                 if (this.chartInstances.cost) {
                     this.chartInstances.cost.updateSeries(newCostSeries);
+                    this.chartInstances.cost.updateOptions({
+                        dataLabels: {
+                            enabled: true,
+                            enabledOnSeries: ['Cost'],
+                            formatter: (val) => '$' + val.toFixed(4),
+                            style: { fontSize: '9px', colors: ['#fff'] }
+                        },
+                        xaxis: { categories: labels }
+                    });
                 } else {
                     this.chartInstances.cost = new ApexCharts(costEl, {
                         chart: {
@@ -546,6 +563,14 @@ function gateway() {
                 
                 if (this.chartInstances.requests) {
                     this.chartInstances.requests.updateSeries(newReqSeries);
+                    this.chartInstances.requests.updateOptions({
+                        dataLabels: {
+                            enabled: true,
+                            formatter: (val) => val,
+                            style: { fontSize: '9px', colors: ['#fff'] }
+                        },
+                        xaxis: { categories: labels }
+                    });
                 } else {
                     this.chartInstances.requests = new ApexCharts(reqEl, {
                         chart: {
@@ -747,6 +772,14 @@ function gateway() {
                 
                 if (this.chartInstances.tokens) {
                     this.chartInstances.tokens.updateSeries(newSeries);
+                    this.chartInstances.tokens.updateOptions({
+                        dataLabels: {
+                            enabled: true,
+                            formatter: (val) => val > 500 ? (val/1000).toFixed(1) + 'K' : val,
+                            style: { fontSize: '9px', colors: ['#fff', '#fff', '#fff'] }
+                        },
+                        xaxis: { categories: labels }
+                    });
                 } else {
                     this.chartInstances.tokens = new ApexCharts(tokEl, {
                         chart: { ...baseChart, type: 'bar', stacked: true },
@@ -791,6 +824,15 @@ function gateway() {
                 
                 if (this.chartInstances.cost) {
                     this.chartInstances.cost.updateSeries(newCostSeries);
+                    this.chartInstances.cost.updateOptions({
+                        dataLabels: {
+                            enabled: true,
+                            enabledOnSeries: ['Cost'],
+                            formatter: (val) => '$' + val.toFixed(4),
+                            style: { fontSize: '9px', colors: ['#fff'] }
+                        },
+                        xaxis: { categories: labels }
+                    });
                 } else {
                     this.chartInstances.cost = new ApexCharts(costEl, {
                         chart: { ...baseChart, type: 'area' },
@@ -836,6 +878,14 @@ function gateway() {
                 
                 if (this.chartInstances.requests) {
                     this.chartInstances.requests.updateSeries(newReqSeries);
+                    this.chartInstances.requests.updateOptions({
+                        dataLabels: {
+                            enabled: true,
+                            formatter: (val) => val,
+                            style: { fontSize: '9px', colors: ['#fff'] }
+                        },
+                        xaxis: { categories: labels }
+                    });
                 } else {
                     this.chartInstances.requests = new ApexCharts(reqEl, {
                         chart: { ...baseChart, type: 'bar' },
