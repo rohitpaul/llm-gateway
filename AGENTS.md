@@ -31,7 +31,6 @@ docker compose logs -f llm-gateway
 
 ```bash
 pip install -e .
-# pip install fastapi[standard] uvicorn[standard] httpx aiosqlite pyyaml python-dotenv pydantic
 ```
 
 ### Linting and Formatting
