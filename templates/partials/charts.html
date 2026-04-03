@@ -15,11 +15,11 @@
                     </select>
                     <!-- Time range -->
                     <div class="flex gap-1 text-xs">
-                        <button @click="chartMode = 'hourly'; loadChartData()"
+                        <button @click="setChartMode('hourly')"
                                 :class="chartMode === 'hourly' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'"
                                 class="px-2 py-1 rounded">Hourly</button>
                         <template x-for="d in [7, 14, 30]" :key="d">
-                            <button @click="chartMode = 'daily'; chartDays = d; loadChartData()"
+                            <button @click="setChartMode('daily', d)"
                                     :class="chartMode === 'daily' && chartDays === d ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'"
                                     class="px-2 py-1 rounded" x-text="d + 'd'"></button>
                         </template>
