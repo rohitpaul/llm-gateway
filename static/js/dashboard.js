@@ -808,6 +808,7 @@ function gateway() {
                         stroke: { width: 2, curve: 'smooth' },
                         dataLabels: {
                             enabled: true,
+                            enabledOnSeries: ['Cost'],
                             formatter: (val) => '$' + val.toFixed(4),
                             style: { fontSize: '9px', colors: ['#fff'] }
                         },
