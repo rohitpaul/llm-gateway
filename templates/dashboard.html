@@ -24,9 +24,8 @@
     {% include 'partials/mobile-nav.html' %}
     {% include 'partials/request-detail-modal.html' %}
     <footer class="text-center py-4 text-xs text-gray-600">
-        <span>Version <span x-text="'v' + (gitHash || 'unknown')"></span></span>
+        <span>Version {{ app_version }}</span>
     </footer>
-    <script>window.ENV = {{ {'gitHash': git_hash} | tojson }}</script>
     <script src="/static/js/dashboard.js"></script>
 </body>
 </html>
