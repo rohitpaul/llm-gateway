@@ -256,7 +256,7 @@ async def verify_admin(request: Request) -> dict:
     """Verify admin key from Bearer header or session cookie."""
     token = extract_admin_token(request)
     if not token:
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
+        raise HTTPException(status_code=401, detail="Missing credentials")
     
     # Check if it's the admin key
     if token == config.ADMIN_KEY:

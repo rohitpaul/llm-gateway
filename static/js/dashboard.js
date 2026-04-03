@@ -55,7 +55,6 @@ function gateway() {
 
         // Auth state
         authenticated: false,
-        adminKey: '',
         loginKey: '',
         loginError: '',
         loginLoading: false,
@@ -63,28 +62,20 @@ function gateway() {
         _refreshInterval: null,
 
       async init() {
-            const saved = localStorage.getItem('gateway_admin_key');
-            console.log('Init: saved key exists?', !!saved);
-            if (saved) {
-                this.adminKey = saved;
-                const valid = await this.verifyKey(saved);
-                console.log('Verify result:', valid);
-                if (valid) {
-                    this.authenticated = true;
-                    await this.loadAll();
-                    this._refreshInterval = setInterval(() => this.loadAll(), 10000);
-                    // Watch for tab changes to charts
-                    this.$watch('tab', (newTab) => {
-                        if (newTab === 'charts' && this.modelsList.length === 0) {
-                            this.loadModels().catch(() => {});
-                        }
-                    });
-                    return;
-                }
-                // Saved key is invalid, clear it
-                console.log('Key invalid, clearing localStorage');
-                localStorage.removeItem('gateway_admin_key');
-                this.adminKey = '';
+            // Check if session cookie is valid
+            const valid = await this.verifySession();
+            console.log('Session verify result:', valid);
+            if (valid) {
+                this.authenticated = true
+                await this.loadAll();
+                this._refreshInterval = setInterval(() => this.loadAll(), 10000);
+                // Watch for tab changes to charts
+                this.$watch('tab', (newTab) => {
+                    if (newTab === 'charts' && this.modelsList.length === 0) {
+                        this.loadModels().catch(() => {});
+                    }
+                });
+                return;
             }
             // Not authenticated - focus the login input after Alpine renders
             this.$nextTick(() => {
@@ -92,16 +83,13 @@ function gateway() {
             });
         },
 
-        async verifyKey(key) {
+        async verifySession() {
+            /** Check session cookie validity (cookie is auto-sent by browser). */
             try {
                 const r = await fetch('/api/auth/verify', {
                     method: 'POST',
-                    headers: {
-                        'Authorization': 'Bearer ' + key,
-                        'Content-Type': 'application/json',
-                    },
+                    credentials: 'same-origin',
                 });
-                console.log('Verify response status:', r.status);
                 return r.ok;
             } catch (e) {
                 console.error('Verify error:', e);
@@ -123,15 +111,14 @@ function gateway() {
             try {
                 const r = await fetch('/api/auth/login', {
                     method: 'POST',
+                    credentials: 'same-origin',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ key })
                 });
                 const data = await r.json();
                 
                 if (data.success) {
-                    this.adminKey = key;
-                    localStorage.setItem('gateway_admin_key', key);
-                    this.authenticated=true;
+                    this.authenticated = true;
                     this.loginKey = '';
                     this.loginError = '';
                     await this.loadAll();
@@ -149,12 +136,10 @@ function gateway() {
         async signOut() {
             // Clear server session cookie
             try {
-                await fetch('/api/auth/logout', { method: 'POST' });
+                await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
             } catch {}
             
-            this.authenticated=false;
-            this.adminKey = '';
-            localStorage.removeItem('gateway_admin_key');
+            this.authenticated = false;
             if (this._refreshInterval) clearInterval(this._refreshInterval);
             this.summary = {};
             this.modelStats = [];
@@ -170,7 +155,6 @@ function gateway() {
 
         headers() {
             return {
-                'Authorization': 'Bearer ' + this.adminKey,
                 'Content-Type': 'application/json',
             };
         },
@@ -178,6 +162,7 @@ function gateway() {
         // Wrapper for API fetches that handles 401 by showing login
         async apiFetch(url, options = {}) {
             options.headers = { ...this.headers(), ...(options.headers || {}) };
+            options.credentials = 'same-origin';
             const r = await fetch(url, options);
             if (r.status === 401 || r.status === 403) {
                 this.signOut();
@@ -336,13 +321,6 @@ function gateway() {
                 from.setDate(from.getDate() - this.chartDays);
                 return from.toISOString().slice(0, 10) !== this._lastDailyKey;
             }
-        }
-
-        // Initialize chart mode tracking
-        ,init() {
-            this._lastHourKey = null;
-            this._lastDailyKey = null;
-            super.init();
         },
 
         _updateChartData(chartInstance, newSeries) {
@@ -1244,7 +1222,7 @@ function gateway() {
             this.editingProviderName = name;
             this.showProviderModal = true;
             // Load current config
-            fetch('/api/config', { headers: { 'Authorization': 'Bearer ' + this.adminKey } })
+            fetch('/api/config', { credentials: 'same-origin' })
                 .then(r => r.json())
                 .then(config => {
                     const provider = config.providers?.[name] || {};
@@ -1281,7 +1259,7 @@ function gateway() {
 
             try {
                 // Get current config
-                const r = await fetch('/api/config', { headers: { 'Authorization': 'Bearer ' + this.adminKey } });
+                const r = await fetch('/api/config', { credentials: 'same-origin' });
                 const config = await r.json();
                 
                 // Update providers
@@ -1313,7 +1291,7 @@ function gateway() {
 
             try {
                 // Get current config
-                const r = await fetch('/api/config', { headers: { 'Authorization': 'Bearer ' + this.adminKey } });
+                const r = await fetch('/api/config', { credentials: 'same-origin' });
                 const config = await r.json();
                 
                 // Update models
