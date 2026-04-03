@@ -64,9 +64,11 @@ function gateway() {
 
       async init() {
             const saved = localStorage.getItem('gateway_admin_key');
+            console.log('Init: saved key exists?', !!saved);
             if (saved) {
                 this.adminKey = saved;
                 const valid = await this.verifyKey(saved);
+                console.log('Verify result:', valid);
                 if (valid) {
                     this.authenticated = true;
                     await this.loadAll();
@@ -80,6 +82,7 @@ function gateway() {
                     return;
                 }
                 // Saved key is invalid, clear it
+                console.log('Key invalid, clearing localStorage');
                 localStorage.removeItem('gateway_admin_key');
                 this.adminKey = '';
             }
@@ -98,8 +101,10 @@ function gateway() {
                         'Content-Type': 'application/json',
                     },
                 });
+                console.log('Verify response status:', r.status);
                 return r.ok;
-            } catch {
+            } catch (e) {
+                console.error('Verify error:', e);
                 return false;
             }
         },

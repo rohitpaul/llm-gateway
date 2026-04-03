@@ -576,20 +576,29 @@ async def health_providers(admin: dict = Depends(verify_admin)):
 async def auth_verify(request: Request):
     """Verify admin credentials. Returns success if valid."""
     try:
+        # Debug: log what we're receiving
+        auth_header = request.headers.get("Authorization", "")
+        cookie = request.cookies.get("gateway_session", "")
+        logger.info(f"Auth verify - Authorization header: {auth_header[:20] if auth_header else 'None'}...")
+        logger.info(f"Auth verify - Session cookie: {cookie[:20] if cookie else 'None'}...")
+        
         admin = await verify_admin(request)
+        logger.info(f"Auth verify - Success for {admin.get('name', 'admin')}")
         return {"valid": True, "name": admin.get("name", "admin")}
-    except HTTPException:
+    except HTTPException as e:
+        logger.warning(f"Auth verify - Failed: {e.detail}")
         return JSONResponse(content={"valid": False}, status_code=401)
 
 
 @app.post("/api/auth/login")
-async def auth_login(request: Request, response: FastAPIResponse):
+async def auth_login(request: Request):
     """Login with admin key. Sets session cookie for browser access."""
     try:
         body = await request.json()
         key = body.get("key", "")
         
         if key == config.ADMIN_KEY:
+            response = JSONResponse(content={"success": True})
             response.set_cookie(
                 key="gateway_session",
                 value=config.ADMIN_KEY,
@@ -598,7 +607,7 @@ async def auth_login(request: Request, response: FastAPIResponse):
                 samesite="lax",
                 secure=False,
             )
-            return {"success": True}
+            return response
         else:
             return JSONResponse(content={"success": False, "error": "Invalid key"}, status_code=401)
     except Exception as e:
