@@ -864,7 +864,7 @@ async def delete_model(model_name: str, admin: dict = Depends(verify_admin)):
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "..", "static")), name="static")
 
 # App version
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 
 @app.get("/")
