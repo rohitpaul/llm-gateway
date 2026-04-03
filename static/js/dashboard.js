@@ -262,7 +262,7 @@ function gateway() {
             }
         },
 
-       // Handle chart mode change - destroy and recreate charts
+        // Handle chart mode change - destroy and recreate charts
         setChartMode(mode, days) {
             if (this.chartMode === mode && !days) return;
             this.chartMode = mode;
@@ -317,7 +317,7 @@ function gateway() {
         }
 
         // Check if chart mode or time range changed
-        _checkChartNeedsReload() {
+        ,_checkChartNeedsReload() {
             const now = new Date();
             if (this.chartMode === 'hourly') {
                 // Last 6 hours
@@ -334,7 +334,7 @@ function gateway() {
         }
 
         // Initialize chart mode tracking
-        init() {
+        ,init() {
             this._lastHourKey = null;
             this._lastDailyKey = null;
             super.init();
@@ -359,7 +359,7 @@ function gateway() {
             return this.loadChartData();
         },
 
-       // Handle chart mode change - destroy and recreate charts
+ // Handle chart mode change - destroy and recreate charts
         setChartMode(mode, days) {
             if (this.chartMode === mode && !days) return;
             this.chartMode = mode;
