@@ -590,17 +590,15 @@ async def auth_login(request: Request, response: FastAPIResponse):
         key = body.get("key", "")
         
         if key == config.ADMIN_KEY:
-            # Set session cookie (valid for 7 days)
-            response = JSONResponse(content={"success": True})
             response.set_cookie(
                 key="gateway_session",
                 value=config.ADMIN_KEY,
-                max_age=60 * 60 * 24 * 7,  # 7 days
+                max_age=60 * 60 * 24 * 7,
                 httponly=True,
                 samesite="lax",
-                secure=False,  # Set to True in production with HTTPS
+                secure=False,
             )
-            return response
+            return {"success": True}
         else:
             return JSONResponse(content={"success": False, "error": "Invalid key"}, status_code=401)
     except Exception as e:
