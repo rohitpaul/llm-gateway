@@ -456,7 +456,7 @@ function gateway() {
                             categories: labels,
                             axisBorder: { show: false },
                             axisTicks: { show: false },
-                            labels: { style: { color: '#9ca3af', fontSize: '9px' } },
+                            labels: { style: { color: '#9ca3af', fontSize: '10px' }, rotate: -45, rotateAlways: true },
                         },
                         yaxis: {
                             labels: { 
@@ -464,7 +464,7 @@ function gateway() {
                                 formatter: (val) => (val/1000).toFixed(1) + 'K'
                             },
                         },
-                        grid: { borderColor: 'rgba(255,255,255,0.08)', strokeDashArray: 3 },
+                        grid: { borderColor: 'rgba(255,255,255,0.06)', strokeDashArray: 3 },
                         legend: { show: false },
                         tooltip: {
                             theme: 'dark',
@@ -518,7 +518,7 @@ function gateway() {
                             categories: labels,
                             axisBorder: { show: false },
                             axisTicks: { show: false },
-                            labels: { style: { color: '#9ca3af', fontSize: '9px' } },
+                            labels: { style: { color: '#9ca3af', fontSize: '10px' }, rotate: -45, rotateAlways: true },
                         },
                         yaxis: {
                             labels: { 
@@ -526,7 +526,7 @@ function gateway() {
                                 formatter: v => '$' + v.toFixed(4)
                             },
                         },
-                        grid: { borderColor: 'rgba(255,255,255,0.08)', strokeDashArray: 3 },
+                        grid: { borderColor: 'rgba(255,255,255,0.06)', strokeDashArray: 3 },
                         legend: { show: false },
                         tooltip: {
                             theme: 'dark',
@@ -574,7 +574,7 @@ function gateway() {
                             categories: labels,
                             axisBorder: { show: false },
                             axisTicks: { show: false },
-                            labels: { style: { color: '#9ca3af', fontSize: '9px' } },
+                            labels: { style: { color: '#9ca3af', fontSize: '10px' }, rotate: -45, rotateAlways: true },
                         },
                         yaxis: {
                             labels: { 
@@ -582,7 +582,7 @@ function gateway() {
                                 formatter: (val) => Math.round(val)
                             },
                         },
-                        grid: { borderColor: 'rgba(255,255,255,0.08)', strokeDashArray: 3 },
+                        grid: { borderColor: 'rgba(255,255,255,0.06)', strokeDashArray: 3 },
                         legend: { show: false },
                         tooltip: {
                             theme: 'dark',
