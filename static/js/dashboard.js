@@ -1,5 +1,6 @@
 function gateway() {
     return {
+        gitHash: window.ENV ? window.ENV.gitHash : '',
         tab: 'stats',
         summary: {},
         modelStats: [],

@@ -857,9 +857,29 @@ async def delete_model(model_name: str, admin: dict = Depends(verify_admin)):
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "..", "static")), name="static")
 
 
+def get_git_hash() -> str:
+    """Get current git commit hash or 'unknown' if not available."""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
+
+
 @app.get("/")
 async def dashboard(request: Request):
-    return templates.TemplateResponse(request, "dashboard.html")
+    context = {
+        "git_hash": get_git_hash(),
+    }
+    return templates.TemplateResponse("dashboard.html", {"request": request, **context})
 
 
 # ---------------------------------------------------------------------------
