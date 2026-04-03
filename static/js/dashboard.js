@@ -43,6 +43,8 @@ function gateway() {
         selectedModel: '',
         modelsLoading: false,
         chartSummary: { requests: 0, cost: 0, latency_ms: 0, cache_rate: 0 },
+        _lastHourKey: null,
+        _lastDailyKey: null,
 
         // Performance metrics
         percentiles: { p50: null, p90: null, p95: null, p99: null },
@@ -260,6 +262,16 @@ function gateway() {
             }
         },
 
+       // Handle chart mode change - destroy and recreate charts
+        setChartMode(mode, days) {
+            if (this.chartMode === mode && !days) return;
+            this.chartMode = mode;
+            this.chartDays = days || 7;
+            // Destroy all charts and reload with new mode
+            this._destroyAllCharts();
+            this.loadChartData();
+        },
+
         async loadChartData() {
             try {
                 const params = new URLSearchParams();
@@ -275,6 +287,7 @@ function gateway() {
                     if (!r.ok) return;
                     const hourly = (await r.json()).hourly || [];
                     this._renderChartsHourly(hourly);
+                    this._lastHourKey = from.toISOString().slice(0, 10) + ' ' + String(from.getUTCHours()).padStart(2, '0') + ':00';
                 } else {
                     const from = new Date();
                     from.setDate(from.getDate() - this.chartDays);
@@ -284,20 +297,76 @@ function gateway() {
                     if (!r.ok) return;
                     this.dailyStatsData = (await r.json()).daily || [];
                     this._renderChartsDaily(this.dailyStatsData);
+                    this._lastDailyKey = dateFrom;
                 }
             } catch {}
         },
 
-        // Helper to update chart data without destroying/recreating (prevents animation reset)
+        // Called when chart mode or time range changes - destroy and recreate charts
+        _reloadCharts() {
+            this._destroyAllCharts();
+            // Re-trigger chart loading with current settings
+            if (this.chartMode === 'hourly') {
+                const from = new Date();
+                from.setHours(from.getHours() - 6);
+                const dateFrom = from.toISOString().slice(0, 10);
+                this.selectedModel ? this.loadChartData() : this.loadChartData();
+            } else {
+                this.loadChartData();
+            }
+        }
+
+        // Check if chart mode or time range changed
+        _checkChartNeedsReload() {
+            const now = new Date();
+            if (this.chartMode === 'hourly') {
+                // Last 6 hours
+                const from = new Date();
+                from.setHours(from.getHours() - 6);
+                const dateFrom = from.toISOString().slice(0, 10) + ' ' + String(from.getUTCHours()).padStart(2, '0') + ':00';
+                return dateFrom !== this._lastHourKey;
+            } else {
+                // Daily
+                const from = new Date();
+                from.setDate(from.getDate() - this.chartDays);
+                return from.toISOString().slice(0, 10) !== this._lastDailyKey;
+            }
+        }
+
+        // Initialize chart mode tracking
+        init() {
+            this._lastHourKey = null;
+            this._lastDailyKey = null;
+            super.init();
+        },
+
         _updateChartData(chartInstance, newSeries) {
             if (chartInstance) {
                 chartInstance.updateSeries(newSeries);
             }
         },
 
+        _destroyAllCharts() {
+            if (this.chartInstances.tokens) { this.chartInstances.tokens.destroy(); }
+            if (this.chartInstances.cost) { this.chartInstances.cost.destroy(); }
+            if (this.chartInstances.requests) { this.chartInstances.requests.destroy(); }
+            if (this.chartInstances.distribution) { this.chartInstances.distribution.destroy(); }
+            Object.assign(this.chartInstances, { tokens: null, cost: null, requests: null, distribution: null });
+        },
+
     async loadDailyStats() {
             // Backwards compat — called from loadAll for refresh
             return this.loadChartData();
+        },
+
+       // Handle chart mode change - destroy and recreate charts
+        setChartMode(mode, days) {
+            if (this.chartMode === mode && !days) return;
+            this.chartMode = mode;
+            this.chartDays = days || 7;
+            // Destroy all charts and reload with new mode
+            this._destroyAllCharts();
+            this.loadChartData();
         },
 
         async loadPercentiles() {
