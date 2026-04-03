@@ -509,7 +509,7 @@ class Database:
         model: str | None = None,
     ) -> list[dict[str, Any]]:
         """Aggregate requests by hour from the raw requests table."""
-        conditions: list[str] = ["status = 'success'"]
+        conditions: list[str] = []
         params: list[Any] = []
 
         if date_from is not None:
@@ -530,11 +530,16 @@ class Database:
             SELECT
                 strftime('%Y-%m-%d %H:00', created_at) AS hour,
                 COUNT(*) AS request_count,
+                SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS success_count,
+                SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error_count,
                 COALESCE(SUM(input_tokens), 0) AS input_tokens,
                 COALESCE(SUM(output_tokens), 0) AS output_tokens,
                 COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
                 COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
-                COALESCE(SUM(cost), 0) AS cost
+                COALESCE(SUM(cost), 0) AS cost,
+                ROUND(COALESCE(AVG(latency_ms), 0), 2) AS avg_latency_ms,
+                ROUND(COALESCE(MAX(latency_ms), 0), 2) AS max_latency_ms,
+                ROUND(COALESCE(MIN(latency_ms), 0), 2) AS min_latency_ms
             FROM requests
             {where}
             GROUP BY hour
@@ -683,7 +688,10 @@ class Database:
             SELECT provider,
                    COUNT(*) as total,
                    SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as errors,
-                   ROUND(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as error_rate
+                   CASE 
+                       WHEN COUNT(*) > 0 THEN ROUND(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2)
+                       ELSE 0.0
+                   END as error_rate
             FROM requests
             {error_where}
             GROUP BY provider
@@ -967,9 +975,9 @@ class Database:
             model_rows = await cur.fetchall()
         
         def esc_prom_label(s):
-            # Escape backslashes and single quotes for Prometheus labels
-            # DO NOT escape double quotes - Prometheus uses them unescaped
-            return s.replace('\\', '\\\\').replace("'", "\\'")
+            # Escape backslashes, single quotes, and double quotes for Prometheus labels
+            # Prometheus labels are enclosed in double quotes, so internal double quotes must be escaped
+            return s.replace('\\', '\\\\').replace('"', '\\"').replace("'", "\\'")
         
         # Helper to add counter metric with per-model breakdown
         # col_idx: which column from model_rows to use for the per-model value

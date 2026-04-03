@@ -21,8 +21,8 @@
                 <div class="text-lg sm:text-2xl font-bold text-green-400" x-text="'$' + (summary.total_cost || 0).toFixed(2)">$0</div>
             </div>
             <div class="bg-gray-900 rounded-lg p-3 sm:p-4 border border-gray-800">
-                <div class="text-[10px] sm:text-xs text-gray-400 mb-0.5 sm:mb-1">Input Tokens</div>
-                <div class="text-lg sm:text-2xl font-bold" x-text="formatTokens(summary.total_input_tokens || 0)">0</div>
+                <div class="text-[10px] sm:text-xs text-gray-400 mb-0.5 sm:mb-1">Input (Billable)</div>
+                <div class="text-lg sm:text-2xl font-bold" x-text="formatTokens((summary.total_input_tokens || 0) - (summary.total_cache_read_tokens || 0))">0</div>
             </div>
             <div class="bg-gray-900 rounded-lg p-3 sm:p-4 border border-gray-800">
                 <div class="text-[10px] sm:text-xs text-gray-400 mb-0.5 sm:mb-1">Output Tokens</div>

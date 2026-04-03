@@ -332,7 +332,7 @@ function gateway() {
                 return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
             });
 
-            // Chart 1: Token Volume (stacked input/output)
+            // Chart 1: Token Volume (stacked billable input/output)
             const tokEl = document.getElementById('chartTokens');
             if (tokEl) {
                 if (this.chartInstances.tokens) this.chartInstances.tokens.destroy();
@@ -348,11 +348,11 @@ function gateway() {
                     },
                     series: [
                         {
-                            name: 'Input Tokens (K)',
-                            data: dates.map(d => (dayMap[d].input_tokens || 0) / 1000),
+                            name: 'Billable Input (K)',
+                            data: dates.map(d => Math.max(0, (dayMap[d].input_tokens || 0) - (dayMap[d].cache_read_tokens || 0)) / 1000),
                         },
                         {
-                            name: 'Cached Tokens (K)',
+                            name: 'Cached Input (K)',
                             data: dates.map(d => (dayMap[d].cache_read_tokens || 0) / 1000),
                         },
                         {
@@ -614,15 +614,15 @@ function gateway() {
             const baseLegend = { labels: { colors: '#d1d5db' }, fontSize: '11px' };
             const baseTheme = { mode: 'dark' };
 
-            // Chart 1: Token Volume (stacked input/output)
+            // Chart 1: Token Volume (stacked billable input/output)
             const tokEl = document.getElementById('chartTokens');
             if (tokEl) {
                 if (this.chartInstances.tokens) this.chartInstances.tokens.destroy();
                 this.chartInstances.tokens = new ApexCharts(tokEl, {
                     chart: { ...baseChart, type: 'bar', stacked: true },
                     series: [
-                        { name: 'Input Tokens (K)', data: hours.map(h => (hourMap[h].input_tokens || 0) / 1000) },
-                        { name: 'Cached Tokens (K)', data: hours.map(h => (hourMap[h].cache_read_tokens || 0) / 1000) },
+                        { name: 'Billable Input (K)', data: hours.map(h => Math.max(0, (hourMap[h].input_tokens || 0) - (hourMap[h].cache_read_tokens || 0)) / 1000) },
+                        { name: 'Cached Input (K)', data: hours.map(h => (hourMap[h].cache_read_tokens || 0) / 1000) },
                         { name: 'Output Tokens (K)', data: hours.map(h => (hourMap[h].output_tokens || 0) / 1000) },
                     ],
                     colors: ['#3b82f6', '#10b981', '#a78bfa'],

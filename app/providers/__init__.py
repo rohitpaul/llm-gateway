@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, AsyncIterator
 
 import httpx
@@ -80,8 +81,19 @@ def calculate_cost(
         config: Optional config dict with model pricing overrides
     
     Returns:
-        Cost in USD
+        Cost in USD (rounded to 6 decimal places to avoid floating point accumulation)
     """
+    def _calc_cost(input_t: int, output_t: int, cache_t: int, prices: dict) -> float:
+        """Calculate cost using Decimal for precision, return rounded float."""
+        input_price = Decimal(str(prices.get("input", 0))) / Decimal("1000000")
+        output_price = Decimal(str(prices.get("output", 0))) / Decimal("1000000")
+        cache_price = Decimal(str(prices.get("cache_read", prices.get("input", 0) * 0.5))) / Decimal("1000000")
+        
+        regular_input = max(0, input_t - cache_t)
+        cost = (Decimal(regular_input) * input_price) + (Decimal(cache_t) * cache_price) + (Decimal(output_t) * output_price)
+        # Round to 6 decimal places (micro-USD precision) to prevent floating point drift
+        return float(cost.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP))
+    
     # Check for config override first
     if config:
         model_routes = config.get("models", {})
@@ -103,20 +115,11 @@ def calculate_cost(
                     }
                 
                 if prices:
-                    input_price = prices.get("input", 0) / 1_000_000
-                    output_price = prices.get("output", 0) / 1_000_000
-                    cache_price = prices.get("cache_read", prices.get("input", 0) * 0.5) / 1_000_000
-                    regular_input = max(0, input_tokens - cache_read_tokens)
-                    return (regular_input * input_price) + (cache_read_tokens * cache_price) + (output_tokens * output_price)
+                    return _calc_cost(input_tokens, output_tokens, cache_read_tokens, prices)
     
     # Fall back to default pricing
     prices = PRICING.get(model, {"input": 0, "output": 0})
-    input_price = prices.get("input", 0) / 1_000_000
-    output_price = prices.get("output", 0) / 1_000_000
-    cache_price = prices.get("cache_read", prices.get("input", 0) * 0.5) / 1_000_000
-
-    regular_input = max(0, input_tokens - cache_read_tokens)
-    return (regular_input * input_price) + (cache_read_tokens * cache_price) + (output_tokens * output_price)
+    return _calc_cost(input_tokens, output_tokens, cache_read_tokens, prices)
 
 
 def resolve_provider(model: str, cfg: dict) -> str:
@@ -239,31 +242,31 @@ async def proxy_chat_completions(
 
         cost = calculate_cost(model, input_tokens, output_tokens, cache_read, cfg)
         
-        # Use upstream timings when available (llama.cpp sends prompt_ms + predicted_ms)
+        # Always use wall-clock latency (includes network + processing)
+        # Upstream timings are optional metadata but wall-clock reflects actual client experience
+        wall_clock_latency_ms = latency_ms
+        
+        # Extract upstream timings if available (llama.cpp sends prompt_ms + predicted_ms)
         timings = resp_json.get("timings", {})
         if timings:
-            upstream_latency = timings.get("prompt_ms", 0) + timings.get("predicted_ms", 0)
             tps = timings.get("predicted_per_second")
-            ttft = timings.get("prompt_ms", latency_ms)
-            # Prefer upstream latency over wall-clock
-            if upstream_latency > 0:
-                latency_ms = upstream_latency
+            # For non-streaming, TTFT = time to first byte (full latency)
+            ttft = wall_clock_latency_ms
         else:
             tps = None
-            ttft = latency_ms
+            ttft = wall_clock_latency_ms
         
         # Fallback: calculate TPS using total latency
-        if tps is None and latency_ms > 0 and output_tokens > 0:
-            tps = output_tokens / (latency_ms / 1000)
+        if tps is None and wall_clock_latency_ms > 0 and output_tokens > 0:
+            tps = output_tokens / (wall_clock_latency_ms / 1000)
         
-        # For non-streaming: TTFT = prompt processing time (or full latency as fallback)
         meta.update(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cache_read_tokens=cache_read,
             cache_write_tokens=0,
             cost=cost,
-            latency_ms=latency_ms,
+            latency_ms=wall_clock_latency_ms,
             time_to_first_token_ms=ttft,
             tokens_per_second=tps,
         )
@@ -384,17 +387,17 @@ async def _handle_stream(
             }
             meta["response_body"] = json.dumps(response_body)
 
-            # Use upstream timings when available
+            # Always use wall-clock latency for consistency
+            wall_clock_latency_ms = (time.monotonic() - start) * 1000
+            
+            # Extract upstream TPS if available
             upstream_timings = parsed.get("timings", {})
-            if upstream_timings:
-                latency_ms = upstream_timings.get("prompt_ms", 0) + upstream_timings.get("predicted_ms", 0)
-                if tps is None:
-                    tps = upstream_timings.get("predicted_per_second")
-            else:
-                latency_ms = (time.monotonic() - start) * 1000
+            if upstream_timings and tps is None:
+                tps = upstream_timings.get("predicted_per_second")
 
-            if tps is None and latency_ms > 0 and usage_data["output_tokens"] > 0:
-                tps = usage_data["output_tokens"] / (latency_ms / 1000)
+            # Fallback: calculate TPS using wall-clock latency
+            if tps is None and wall_clock_latency_ms > 0 and usage_data["output_tokens"] > 0:
+                tps = usage_data["output_tokens"] / (wall_clock_latency_ms / 1000)
 
             meta.update(
                 input_tokens=usage_data["input_tokens"],
@@ -402,7 +405,7 @@ async def _handle_stream(
                 cache_read_tokens=usage_data["cache_read"],
                 cache_write_tokens=0,
                 cost=calculate_cost(model, usage_data["input_tokens"], usage_data["output_tokens"], usage_data["cache_read"], cfg),
-                latency_ms=latency_ms,
+                latency_ms=wall_clock_latency_ms,
                 time_to_first_token_ms=meta.get("time_to_first_token_ms", 0),
                 tokens_per_second=tps,
             )
