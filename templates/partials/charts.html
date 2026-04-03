@@ -1,5 +1,5 @@
 <!-- Charts Tab -->
-    <div x-show="tab==='charts'" x-cloak class="fade-in space-y-6">
+    <div x-show="tab==='charts'" x-cloak class="fade-in space-y-4">
         <div class="bg-gray-900 rounded-lg p-4 border border-gray-800">
             <!-- Filters -->
             <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
@@ -27,23 +27,55 @@
                 </div>
             </div>
 
+            <!-- Summary Stats Row -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                <div class="bg-gray-800/50 rounded-lg p-3 border border-gray-700/50">
+                    <div class="text-[10px] text-gray-400 mb-1">Total Requests</div>
+                    <div class="text-xl font-bold text-white" x-text="chartSummary.requests?.toLocaleString() || '0'">0</div>
+                </div>
+                <div class="bg-gray-800/50 rounded-lg p-3 border border-gray-700/50">
+                    <div class="text-[10px] text-gray-400 mb-1">Total Cost</div>
+                    <div class="text-xl font-bold text-green-400" x-text="'$' + (chartSummary.cost || 0).toFixed(4)">$0</div>
+                </div>
+                <div class="bg-gray-800/50 rounded-lg p-3 border border-gray-700/50">
+                    <div class="text-[10px] text-gray-400 mb-1">Avg Latency</div>
+                    <div class="text-xl font-bold text-blue-400" x-text="chartSummary.latency_ms ? (chartSummary.latency_ms >= 1000 ? (chartSummary.latency_ms/1000).toFixed(1) + 's' : chartSummary.latency_ms.toFixed(0) + 'ms') : '—'">—</div>
+                </div>
+                <div class="bg-gray-800/50 rounded-lg p-3 border border-gray-700/50">
+                    <div class="text-[10px] text-gray-400 mb-1">Cache Hit Rate</div>
+                    <div class="text-xl font-bold text-yellow-400" x-text="chartSummary.cache_rate ? chartSummary.cache_rate.toFixed(1) + '%' : '0%'">0%</div>
+                </div>
+            </div>
+
             <!-- Charts grid -->
-            <div class="grid md:grid-cols-2 gap-4 sm:gap-6">
-                <!-- Chart 1: Token Volume (Input, Output, Cache) -->
-                <div class="h-52 sm:h-64">
-                    <div id="chartTokens"></div>
+            <div class="grid md:grid-cols-2 gap-4">
+                <!-- Chart 1: Token Volume -->
+                <div class="bg-gray-800/30 rounded-lg p-3 border border-gray-700/50">
+                    <div class="text-xs font-medium text-gray-300 mb-2">Token Volume</div>
+                    <div class="h-48">
+                        <div id="chartTokens"></div>
+                    </div>
                 </div>
-                <!-- Chart 2: Cost -->
-                <div class="h-52 sm:h-64">
-                    <div id="chartCost"></div>
+                <!-- Chart 2: Cost Trend -->
+                <div class="bg-gray-800/30 rounded-lg p-3 border border-gray-700/50">
+                    <div class="text-xs font-medium text-gray-300 mb-2">Cost Trend</div>
+                    <div class="h-48">
+                        <div id="chartCost"></div>
+                    </div>
                 </div>
-                <!-- Chart 3: Cache Hits -->
-                <div class="h-52 sm:h-64">
-                    <div id="chartCache"></div>
+                <!-- Chart 3: Request Volume -->
+                <div class="bg-gray-800/30 rounded-lg p-3 border border-gray-700/50">
+                    <div class="text-xs font-medium text-gray-300 mb-2">Request Volume</div>
+                    <div class="h-48">
+                        <div id="chartRequests"></div>
+                    </div>
                 </div>
-                <!-- Chart 4: Token Distribution (Pie) -->
-                <div class="h-52 sm:h-64">
-                    <div id="chartDistribution"></div>
+                <!-- Chart 4: Token Distribution -->
+                <div class="bg-gray-800/30 rounded-lg p-3 border border-gray-700/50">
+                    <div class="text-xs font-medium text-gray-300 mb-2">Token Distribution</div>
+                    <div class="h-48 flex items-center justify-center">
+                        <div id="chartDistribution"></div>
+                    </div>
                 </div>
             </div>
         </div>
